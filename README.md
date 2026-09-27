@@ -1,0 +1,78 @@
+# Spectral Skill Discovery (SSD)
+
+Implementation of the SSD algorithm (Spectral Skill Discovery): a METRA-style skill learner whose encoder
+dimensions are **ordered** by asymmetric decorrelation constraints, trained with an augmented
+Lagrangian (duals β, ν and a growing barrier c). A permutation-tested **spectrum readout** estimates
+the intrinsic skill dimension K⋆.
+
+State-based environments, observations, normaliser presets, network sizes and SAC details follow
+the METRA reference implementation, so results are directly comparable. The code
+itself is new and self-contained: METRA's garage / gym / mujoco-py stack only runs on Python 3.8.
+
+## Requirements
+
+- Python 3.14, PyTorch 2.14 (CUDA 12.6 build), Gymnasium 1.3, MuJoCo 3.14, NumPy 2.5
+- [uv](https://docs.astral.sh/uv/) (already at `~/.local/bin/uv`)
+
+```bash
+uv sync            # creates .venv with the pinned versions from uv.lock
+uv run pytest      # unit tests (no MuJoCo needed)
+```
+
+**Cluster notes.**
+- The login node's CPU has no AVX, and MuJoCo 3 needs it. Anything that simulates must run on a
+  compute node; the unit tests run anywhere.
+- torch comes from PyTorch's `cu126` index because the A40 nodes have driver 570 (CUDA 12.8), and
+  PyPI's default torch 2.14 wheel needs CUDA 13.
+- `cn22-a40` failed every job during setup, so exclude it with `--exclude=cn22-a40`.
+
+## Running
+
+```bash
+# State-based Ant, K = 8 (METRA's Ant throughput: 8 rollouts x 200 steps, 50 updates per iteration)
+sbatch --exclude=cn22-a40 ssd.slurm --env ant --dim_skill 8 --seed 0
+
+# HalfCheetah
+sbatch --exclude=cn22-a40 ssd.slurm --env half_cheetah --dim_skill 8 --seed 0
+
+# One rollout and one update per iteration
+uv run train.py --env ant --rollouts_per_iter 1 --updates_per_iter 1 --n_dual 10 --n_eval 20000
+```
+
+`uv run train.py --help` lists every flag. The algorithm's hyperparameters all live in
+`SSDConfig` ([ssd/algorithm.py](ssd/algorithm.py)), and each field is exposed as a flag of the same name.
+
+Outputs go to `exp/<run_group>/<env>_K<K>_s<seed>_<time>/`:
+- `progress.csv`: training scalars (J, h, |C|, ν, c, SAC stats).
+- `eval.csv`: K⋆, σ²ₖ, Rₖ and floorₖ for every k, plus coverage.
+- `plots/`: spectrum and x-y trajectory figures.
+- `tb/`: TensorBoard logs.
+- `checkpoint.pt`: saved checkpoint.
+
+## Mapping to the SSD algorithm
+
+| Part | Where |
+|---|---|
+| Initialisation (θ, θ̄, ω, ψ, β=0, ν₀, c₀, D) | `SpectralSkillDiscovery.__init__`, `TrajectoryBuffer` |
+| Sample z ~ N(0, I_K), roll out T steps | `train.py` loop, `ssd/rollout.py` |
+| Intrinsic reward, SAC | `SpectralSkillDiscovery.update`, `ssd/sac.py` |
+| Two batches, Cₖⱼ, h | `spectral.decorrelation`, `spectral.temporal_hinge` |
+| Ĵ, L, ascent on θ | `spectral.skill_objective`, `spectral.lagrangian` (Adam on −L) |
+| Duals every n_dual updates | `SpectralSkillDiscovery.update` |
+| Barrier, EMA target | `SpectralSkillDiscovery.update` |
+| Spectrum readout, permutation test, K⋆ | `SpectralSkillDiscovery.spectrum`, `spectral.spectrum_readout` |
+
+## Choices not fixed by the algorithm
+
+- **Iteration granularity.** One outer iteration collects `--rollouts_per_iter` trajectories, then
+  runs `--updates_per_iter` updates. `n_dual` and the barrier schedule count those updates,
+  and `n_eval` counts outer iterations. Updates start once D holds `--min_buffer_size` transitions,
+  as in METRA.
+- **EMA target θ̄.** It is maintained, but by default neither the reward
+  nor the readout uses θ̄. `--reward_use_target 1` and `--readout_use_target 1` switch them over.
+- **States in Cₖⱼ.** The decorrelation statistics use s from each batch. ε is added to the
+  denominator, and σ uses population std.
+- **Readout trajectories.** These are N trajectories sampled from D. Separately, a
+  deterministic evaluation rollout with fresh z gives METRA's coverage metric and the trajectory plot.
+- **Dual, barrier and encoder rates.** The defaults in `SSDConfig` (ν₀=30 as METRA's λ₀; ηβ=ην=1e-2,
+  n_dual=10, c₀=1, κ=1e-5, c_max=100) are reasonable starting points but have **not been tuned**.
