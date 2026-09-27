@@ -1,0 +1,27 @@
+[project]
+name = "spectral-skill-discovery"
+version = "0.1.0"
+description = "Spectral Skill Discovery (SSD): ordered, decorrelated skill representations with a permutation-tested intrinsic dimension."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "torch>=2.14.0",
+    "numpy>=2.5.3",
+    "gymnasium[mujoco]>=1.3.0",
+    "mujoco>=3.14.0",
+    "matplotlib>=3.11.2",
+    "tensorboard>=2.21.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ssd"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"ssd/assets" = "ssd/assets"
