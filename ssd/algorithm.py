@@ -31,6 +31,7 @@ class SSDConfig:
     c_max: float = 100.0
     n_dual: int = 10                   # dual update period, in updates
     eps: float = 1e-6
+    sigma_k_grad: bool = True          # gradient through sigma_k in C_kj
     # EMA target encoder
     encoder_tau: float = 5e-3
     reward_use_target: bool = False
@@ -84,7 +85,7 @@ class SpectralSkillDiscovery:
         return self.policy(obs, z, deterministic=deterministic)[0]
 
     def _constraints(self, phi_s: torch.Tensor, phi_next: torch.Tensor):
-        c = spectral.decorrelation(phi_s, self.rows, self.cols, self.cfg.eps)
+        c = spectral.decorrelation(phi_s, self.rows, self.cols, self.cfg.eps, self.cfg.sigma_k_grad)
         h = spectral.temporal_hinge(phi_s, phi_next)
         return c, h
 

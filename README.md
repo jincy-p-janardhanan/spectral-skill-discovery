@@ -70,6 +70,12 @@ Outputs go to `exp/<run_group>/<env>_K<K>_s<seed>_<time>/`:
   as in METRA.
 - **EMA target θ̄.** It is maintained, but by default neither the reward
   nor the readout uses θ̄. `--reward_use_target 1` and `--readout_use_target 1` switch them over.
+- **Gradient through σₖ .** If the whole denominator sg(σₖσⱼ + ε) is stop-gradiented, the gradient
+  on φₖ contains an extra C·φ̃ₖ/σₖ² term, so the
+  barrier shrinks φₖ, faster and faster as σₖ falls, until the shared ReLU layers die and φ is
+  constant. This happened on Ant: σ² reached 0 and K⋆ stayed 0. By default (`--sigma_k_grad 1`)
+  the denominator is σₖ·sg(σⱼ) + ε, which makes the gradient scale-invariant, while gradients
+  still reach only the later dimension k. `--sigma_k_grad 0` stop-gradients the whole denominator.
 - **States in Cₖⱼ.** The decorrelation statistics use s from each batch. ε is added to the
   denominator, and σ uses population std.
 - **Readout trajectories.** These are N trajectories sampled from D. Separately, a

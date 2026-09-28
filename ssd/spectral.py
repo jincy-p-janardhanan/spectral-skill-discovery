@@ -11,25 +11,20 @@ def lower_pairs(k: int, device=None) -> tuple[torch.Tensor, torch.Tensor]:
     return idx[0], idx[1]
 
 
-def decorrelation(phi: torch.Tensor, rows: torch.Tensor, cols: torch.Tensor, eps: float) -> torch.Tensor:
-    """Asymmetric correlation estimates C_kj for j < k on one batch.
+def decorrelation(
+    phi: torch.Tensor, rows: torch.Tensor, cols: torch.Tensor, eps: float, sigma_k_grad: bool = True
+) -> torch.Tensor:
+    """Correlations C_kj for j < k, ordered like (rows, cols), with gradients only through dimension k.
 
-    C_kj = mean_B[ phi~_k(s) * sg(phi~_j(s)) ] / sg(sigma_k * sigma_j + eps)
+        C_kj = mean_B[phi~_k * sg(phi~_j)] / (sigma_k * sg(sigma_j) + eps)
 
-    Gradients flow only through the later dimension k, so dimension k is pushed to decorrelate
-    from every earlier dimension j < k while earlier dimensions are left untouched. This is what
-    orders the representation.
-
-    Args:
-        phi: encoder outputs phi(s) on the batch, shape [B, K].
-        rows, cols: output of `lower_pairs` (k and j indices).
-    Returns:
-        Flat tensor of the K(K-1)/2 entries C_kj, ordered like (rows, cols).
+    sigma_k_grad=False stop-gradients the whole denominator.
     """
     phi_c = phi - phi.mean(dim=0, keepdim=True)
-    sigma = phi.detach().std(dim=0, correction=0)
+    sigma_j = phi.detach().std(dim=0, correction=0)
+    sigma_k = phi.std(dim=0, correction=0) if sigma_k_grad else sigma_j
     cov = phi_c.T @ phi_c.detach() / phi.shape[0]
-    denom = sigma[:, None] * sigma[None, :] + eps
+    denom = sigma_k[:, None] * sigma_j[None, :] + eps
     return (cov / denom)[rows, cols]
 
 

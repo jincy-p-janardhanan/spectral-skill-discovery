@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from ssd import spectral
@@ -15,14 +16,32 @@ def test_decorrelation_value_is_pearson_correlation():
     torch.testing.assert_close(c, ref, atol=1e-4, rtol=1e-4)
 
 
-def test_decorrelation_gradient_flows_only_through_later_dimension():
+@pytest.mark.parametrize("sigma_k_grad", [True, False])
+def test_decorrelation_gradient_flows_only_through_later_dimension(sigma_k_grad):
     torch.manual_seed(0)
     phi = torch.randn(512, 3, requires_grad=True)
     rows, cols = spectral.lower_pairs(3)
-    spectral.decorrelation(phi, rows, cols, eps=1e-6).sum().backward()
+    spectral.decorrelation(phi, rows, cols, eps=1e-6, sigma_k_grad=sigma_k_grad).sum().backward()
     # Dimension 1 only ever appears as j (the stop-gradient side) -> no gradient.
     assert torch.all(phi.grad[:, 0] == 0)
     assert phi.grad[:, 1].abs().sum() > 0 and phi.grad[:, 2].abs().sum() > 0
+
+
+@pytest.mark.parametrize("sigma_k_grad", [True, False])
+def test_decorrelation_gradient_scale_invariance(sigma_k_grad):
+    """With sigma_k in the graph, dC_kj/dphi_k is orthogonal to phi~_k; without it, it is not."""
+    torch.manual_seed(0)
+    x = torch.randn(1024, 2)
+    x[:, 1] += 0.6 * x[:, 0]
+    phi = x.clone().requires_grad_()
+    rows, cols = spectral.lower_pairs(2)
+    spectral.decorrelation(phi, rows, cols, eps=0.0, sigma_k_grad=sigma_k_grad).sum().backward()
+    phi_c = x[:, 1] - x[:, 1].mean()
+    radial = (phi.grad[:, 1] * phi_c).sum() / (phi.grad[:, 1].norm() * phi_c.norm())
+    if sigma_k_grad:
+        assert radial.abs() < 1e-5
+    else:
+        assert radial > 0.1  # gradient ascent on C grows phi_k, so descent on C^2 shrinks it
 
 
 def test_temporal_hinge():
