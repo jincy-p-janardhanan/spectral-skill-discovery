@@ -9,8 +9,11 @@ __pycache__/
 exp/
 logs/
 *.pt
+figures/
 
 .vscode/
 .idea/
 *.swp
 .DS_Store
+
+plot_results.py

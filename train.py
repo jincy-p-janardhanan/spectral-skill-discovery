@@ -34,6 +34,8 @@ def parse_args():
     p.add_argument("--run_group", default="Debug")
     p.add_argument("--exp_dir", default="exp")
     p.add_argument("--normalize_obs", type=int, default=1, help="METRA's 'preset' observation normaliser")
+    p.add_argument("--unit_skills", type=int, default=0,
+                   help="normalise z to unit length as METRA does (diagnostic; the SSD algorithm uses z ~ N(0, I_K))")
 
     p.add_argument("--horizon", type=int, default=200, help="T")
     p.add_argument("--n_iters", type=int, default=100_000)
@@ -80,6 +82,11 @@ class Logger:
         plt.close(fig)
 
 
+def sample_skills(rng, n: int, k: int, unit: bool) -> np.ndarray:
+    z = rng.standard_normal((n, k))
+    return z / np.linalg.norm(z, axis=1, keepdims=True) if unit else z
+
+
 def main():
     args = parse_args()
     cfg = SSDConfig(**{f.name: f.type(getattr(args, f.name)) for f in dataclasses.fields(SSDConfig)})
@@ -113,7 +120,7 @@ def main():
 
     for it in range(1, args.n_iters + 1):
         # rollouts
-        z = rng.standard_normal((args.rollouts_per_iter, k))
+        z = sample_skills(rng, args.rollouts_per_iter, k, bool(args.unit_skills))
         traj = rollout(train_envs, agent.policy, z, args.horizon, device)
         buffer.add(traj["obs"], traj["act"], traj["done"], traj["z"])
         env_steps += args.rollouts_per_iter * args.horizon
@@ -147,7 +154,7 @@ def main():
                 row[f"spectrum/R_{i + 1}"] = spec.returns[i].item()
                 row[f"spectrum/floor_{i + 1}"] = spec.floor[i].item()
 
-            ez = rng.standard_normal((args.n_eval_rollouts, k))
+            ez = sample_skills(rng, args.n_eval_rollouts, k, bool(args.unit_skills))
             ev = rollout(eval_envs, agent.policy, ez, args.horizon, device, deterministic=True)
             row["eval/coverage"] = coverage(ev["xy"], args.env)
             logger.scalars("eval", env_steps, row)
