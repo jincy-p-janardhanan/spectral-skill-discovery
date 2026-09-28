@@ -28,6 +28,30 @@ def rollout(envs, policy, z: np.ndarray, horizon: int, device, deterministic: bo
     return {"obs": obs_buf, "act": act_buf, "done": done_buf, "z": np.asarray(z, dtype=np.float32), "xy": xy_buf}
 
 
+SWEEP_ALPHAS = (-2.0, -1.0, 0.0, 1.0, 2.0)
+
+
+@torch.no_grad()
+def dimension_sweep(envs, policy, encoder, dim_skill: int, horizon: int, device,
+                    alphas=SWEEP_ALPHAS) -> dict[str, np.ndarray]:
+    """Deterministic rollouts of z = alpha * e_k for each dimension k, cycling through alphas over the envs.
+
+    Returns xy [K, n, T+1, 2], dphi [K, n, T+1] = phi_k(s_t) - phi_k(s_0), and alpha [n].
+    """
+    n = len(envs)
+    alpha = np.resize(np.asarray(alphas, dtype=np.float32), n)
+    xy, dphi = [], []
+    for k in range(dim_skill):
+        z = np.zeros((n, dim_skill), dtype=np.float32)
+        z[:, k] = alpha
+        traj = rollout(envs, policy, z, horizon, device, deterministic=True)
+        obs = torch.as_tensor(traj["obs"], device=device)
+        phi_k = encoder(obs.reshape(-1, obs.shape[-1]))[:, k].reshape(n, horizon + 1)
+        dphi.append((phi_k - phi_k[:, :1]).cpu().numpy())
+        xy.append(traj["xy"])
+    return {"xy": np.stack(xy), "dphi": np.stack(dphi), "alpha": alpha}
+
+
 def coverage(xy: np.ndarray, env_name: str) -> int:
     """METRA's state-coverage metric: number of unique integer-floored (x, y) cells (x only for HalfCheetah)."""
     dims = 1 if env_name == "half_cheetah" else 2

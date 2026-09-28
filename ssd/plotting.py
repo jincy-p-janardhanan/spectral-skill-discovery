@@ -34,6 +34,45 @@ def plot_trajectories(xy: np.ndarray, z: np.ndarray, env_name: str, axis_lim: fl
     return fig
 
 
+ALPHA_COLORS = {-2.0: "#184f95", -1.0: "#6da7ec", 0.0: "#9b9a96", 1.0: "#ef8e8d", 2.0: "#b8292a"}
+
+
+def plot_dimension_sweeps(sweep: dict, env_name: str, axis_lim: float | None = None, title: str | None = None):
+    """One column per dimension k for z = alpha * e_k: x-y paths (top), phi_k(s_t) - phi_k(s_0) (bottom)."""
+    xy, dphi, alpha = sweep["xy"], sweep["dphi"], sweep["alpha"]
+    k_dims, n, t1 = dphi.shape
+    fig, axes = plt.subplots(2, k_dims, figsize=(2.9 * k_dims, 6.2), squeeze=False,
+                             gridspec_kw={"height_ratios": [1.15, 1]})
+    lim = axis_lim or max(1.0, np.abs(xy).max() * 1.05)
+    ylim = np.abs(dphi).max() * 1.05 or 1.0
+    for k in range(k_dims):
+        ax = axes[0, k]
+        for i in range(n):
+            y = xy[k, i, :, 1] if env_name != "half_cheetah" else np.full(t1, (i - n / 2) / 1.25)
+            ax.plot(xy[k, i, :, 0], y, color=ALPHA_COLORS.get(float(alpha[i]), "#52514e"), lw=1.2)
+        ax.set_xlim(-lim, lim)
+        ax.set_ylim(-lim, lim)
+        ax.set_aspect("equal")
+        ax.set_title(f"dimension {k + 1}", fontsize=10, fontweight="bold", loc="left")
+        ax.tick_params(labelsize=7)
+        ax = axes[1, k]
+        for i in range(n):
+            ax.plot(np.arange(t1), dphi[k, i], color=ALPHA_COLORS.get(float(alpha[i]), "#52514e"), lw=1.2)
+        ax.set_ylim(-ylim, ylim)
+        ax.axhline(0, color="#c3c2b7", lw=0.8)
+        ax.set_xlabel("step t", fontsize=8)
+        ax.tick_params(labelsize=7)
+    axes[0, 0].set_ylabel("y (m)", fontsize=8)
+    axes[1, 0].set_ylabel(r"$\phi_k(s_t)-\phi_k(s_0)$", fontsize=8)
+    handles = [plt.Line2D([], [], color=c, lw=2, label=f"α = {a:+g}") for a, c in ALPHA_COLORS.items()]
+    fig.legend(handles=handles, loc="upper center", ncol=len(handles), frameon=False, fontsize=8.5,
+               bbox_to_anchor=(0.5, 1.0))
+    fig.suptitle(title or "Skills z = α·eₖ, one dimension at a time", x=0.01, y=0.955, ha="left",
+                 fontsize=11, fontweight="bold")
+    fig.tight_layout(rect=(0, 0, 1, 0.9))
+    return fig
+
+
 def plot_spectrum(spec: Spectrum):
     sigma2, ret, floor = (x.cpu().numpy() for x in (spec.sigma2, spec.returns, spec.floor))
     k = np.arange(1, len(sigma2) + 1)

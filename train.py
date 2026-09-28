@@ -22,8 +22,8 @@ from torch.utils.tensorboard import SummaryWriter
 from ssd.algorithm import SpectralSkillDiscovery, SSDConfig
 from ssd.buffer import TrajectoryBuffer
 from ssd.envs import ENVS, make_env
-from ssd.plotting import plot_spectrum, plot_trajectories
-from ssd.rollout import coverage, rollout
+from ssd.plotting import plot_dimension_sweeps, plot_spectrum, plot_trajectories
+from ssd.rollout import SWEEP_ALPHAS, coverage, dimension_sweep, rollout
 
 
 def parse_args():
@@ -160,12 +160,17 @@ def main():
             logger.scalars("eval", env_steps, row)
             logger.figure("spectrum", plot_spectrum(spec), env_steps)
             logger.figure("trajectories", plot_trajectories(ev["xy"], ez, args.env, args.eval_plot_axis), env_steps)
+            sweep = dimension_sweep(eval_envs[:2 * len(SWEEP_ALPHAS)], agent.policy, agent.encoder, k,
+                                    args.horizon, device)
+            logger.figure("sweeps", plot_dimension_sweeps(sweep, args.env, args.eval_plot_axis), env_steps)
             print(f"[eval] it {it} | K* = {spec.k_star} | coverage {row['eval/coverage']} "
                   f"| R = {np.array2string(spec.returns.cpu().numpy(), precision=3)}", flush=True)
 
         if it % args.n_save == 0 or it == args.n_iters:
-            torch.save({"iter": it, "env_steps": env_steps, "config": vars(args), "agent": agent.state_dict()},
-                       log_dir / "checkpoint.pt")
+            ckpt = {"iter": it, "env_steps": env_steps, "config": vars(args), "agent": agent.state_dict()}
+            torch.save(ckpt, log_dir / "checkpoint.pt")
+            (log_dir / "checkpoints").mkdir(exist_ok=True)
+            torch.save(ckpt, log_dir / "checkpoints" / f"ckpt_{env_steps:09d}.pt")
 
 
 if __name__ == "__main__":
