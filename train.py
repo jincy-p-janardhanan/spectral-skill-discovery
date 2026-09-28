@@ -21,9 +21,10 @@ from torch.utils.tensorboard import SummaryWriter
 
 from ssd.algorithm import SpectralSkillDiscovery, SSDConfig
 from ssd.buffer import TrajectoryBuffer
-from ssd.envs import ENVS, make_env
+from ssd.envs import ENVS, encoder_input_idx, make_env
 from ssd.plotting import plot_dimension_sweeps, plot_spectrum, plot_trajectories
-from ssd.rollout import SWEEP_ALPHAS, coverage, dimension_sweep, rollout
+from ssd.metrics import body_coverage, coverage
+from ssd.rollout import SWEEP_ALPHAS, dimension_sweep, rollout
 
 
 def parse_args():
@@ -36,6 +37,8 @@ def parse_args():
     p.add_argument("--normalize_obs", type=int, default=1, help="METRA's 'preset' observation normaliser")
     p.add_argument("--unit_skills", type=int, default=0,
                    help="normalise z to unit length as METRA does (diagnostic; the SSD algorithm uses z ~ N(0, I_K))")
+    p.add_argument("--encoder_hide_pos", type=int, default=0,
+                   help="hide the global position (Ant x, y) from phi; the policy and critics still see it")
 
     p.add_argument("--horizon", type=int, default=200, help="T")
     p.add_argument("--n_iters", type=int, default=100_000)
@@ -110,7 +113,8 @@ def main():
     space = train_envs[0].action_space
     k = cfg.dim_skill
 
-    agent = SpectralSkillDiscovery(cfg, obs_dim, space.shape[0], space.low, space.high, device, seed=args.seed)
+    agent = SpectralSkillDiscovery(cfg, obs_dim, space.shape[0], space.low, space.high, device, seed=args.seed,
+                                   encoder_input_idx=encoder_input_idx(args.env, obs_dim, bool(args.encoder_hide_pos)))
     buffer = TrajectoryBuffer(args.buffer_size, args.horizon, obs_dim, space.shape[0], k, device)
 
     env_steps = 0
@@ -155,8 +159,9 @@ def main():
                 row[f"spectrum/floor_{i + 1}"] = spec.floor[i].item()
 
             ez = sample_skills(rng, args.n_eval_rollouts, k, bool(args.unit_skills))
-            ev = rollout(eval_envs, agent.policy, ez, args.horizon, device, deterministic=True)
+            ev = rollout(eval_envs, agent.policy, ez, args.horizon, device, deterministic=True, record_raw=True)
             row["eval/coverage"] = coverage(ev["xy"], args.env)
+            row.update({f"eval/{key}": val for key, val in body_coverage(ev["raw"], eval_envs[0]).items()})
             logger.scalars("eval", env_steps, row)
             logger.figure("spectrum", plot_spectrum(spec), env_steps)
             logger.figure("trajectories", plot_trajectories(ev["xy"], ez, args.env, args.eval_plot_axis), env_steps)
@@ -164,6 +169,7 @@ def main():
                                     args.horizon, device)
             logger.figure("sweeps", plot_dimension_sweeps(sweep, args.env, args.eval_plot_axis), env_steps)
             print(f"[eval] it {it} | K* = {spec.k_star} | coverage {row['eval/coverage']} "
+                  f"| orientation {row['eval/orientation_coverage']} | posture {row['eval/posture_coverage']} "
                   f"| R = {np.array2string(spec.returns.cpu().numpy(), precision=3)}", flush=True)
 
         if it % args.n_save == 0 or it == args.n_iters:

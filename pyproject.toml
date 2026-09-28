@@ -11,6 +11,8 @@ dependencies = [
     "mujoco>=3.14.0",
     "matplotlib>=3.11.2",
     "tensorboard>=2.21.0",
+    "imageio[ffmpeg]>=2.37.4",
+    "pillow>=12.3.0",
 ]
 
 [dependency-groups]

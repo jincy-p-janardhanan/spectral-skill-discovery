@@ -39,6 +39,22 @@ sbatch --exclude=cn22-a40 ssd.slurm --env half_cheetah --dim_skill 8 --seed 0
 uv run train.py --env ant --rollouts_per_iter 1 --updates_per_iter 1 --n_dual 10 --n_eval 20000
 ```
 
+To push skills beyond walking, `--encoder_hide_pos 1` hides the global position (Ant x, y) from φ; the policy
+and critics still see the full state. With position hidden, walking no longer raises the intrinsic reward
+directly, so skills have to change the body itself.
+
+Every evaluation logs three coverage metrics over 48 deterministic rollouts:
+- `eval/coverage`: unique 1 m x-y cells (METRA's metric).
+- `eval/orientation_coverage`: unique 30° cells of torso roll, pitch and yaw.
+- `eval/posture_coverage`: unique cells of the 8 joint angles, 5 bins per joint.
+
+Each evaluation also saves a per-dimension sweep figure (skills z = α·eₖ). The same figure, plus videos, can
+be made from any checkpoint (on a GPU node; rendering uses EGL):
+
+```bash
+uv run visualize.py "exp/<group>/<run>/checkpoint.pt" --out figures/sweeps/run.png --axis 50 --video figures/videos/run
+```
+
 `uv run train.py --help` lists every flag. The algorithm's hyperparameters all live in
 `SSDConfig` ([ssd/algorithm.py](ssd/algorithm.py)), and each field is exposed as a flag of the same name.
 

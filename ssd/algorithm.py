@@ -49,13 +49,13 @@ class SSDConfig:
 
 
 class SpectralSkillDiscovery:
-    def __init__(self, cfg: SSDConfig, obs_dim: int, act_dim: int, act_low, act_high, device, seed: int = 0):
+    def __init__(self, cfg: SSDConfig, obs_dim: int, act_dim: int, act_low, act_high, device, seed: int = 0,
+                 encoder_input_idx: list[int] | None = None):
         self.cfg = cfg
         self.device = device
         k = cfg.dim_skill
 
-        # theta, theta-bar
-        self.encoder = Encoder(obs_dim, k, cfg.hidden_dim, cfg.n_layers).to(device)
+        self.encoder = Encoder(obs_dim, k, cfg.hidden_dim, cfg.n_layers, encoder_input_idx).to(device)
         self.target_encoder = copy.deepcopy(self.encoder).requires_grad_(False)
         self.encoder_opt = torch.optim.Adam(self.encoder.parameters(), lr=cfg.lr_theta)
 

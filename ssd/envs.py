@@ -9,6 +9,8 @@ import numpy as np
 from gymnasium import spaces
 from gymnasium.envs.mujoco import MujocoEnv
 
+from ssd.metrics import quat_to_euler
+
 ASSETS = Path(__file__).parent / "assets"
 
 # observation mean / std, from METRA
@@ -73,11 +75,32 @@ class _SkillMujocoEnv(MujocoEnv):
     def _get_reset_info(self):
         return {"coordinates": self._xy()}
 
+    # body metrics, on raw (unnormalised) observations
+    pos_obs_idx: tuple[int, ...]  # global position
+    joint_ids: slice              # actuated limb joints
+
+    @staticmethod
+    def orientation(raw: np.ndarray) -> np.ndarray:
+        """Torso orientation angles (radians), [..., n_angles]."""
+        raise NotImplementedError
+
+    @staticmethod
+    def joint_angles(raw: np.ndarray) -> np.ndarray:
+        """Limb joint angles (radians), [..., n_joints]."""
+        raise NotImplementedError
+
+    @property
+    def joint_range(self) -> np.ndarray:
+        """[n_joints, 2] lower / upper limit of each limb joint (radians)."""
+        return self.model.jnt_range[self.joint_ids].copy()
+
 
 class AntEnv(_SkillMujocoEnv):
     """obs = qpos[:15] + qvel[:14], 29-D."""
 
     xml, name = "ant.xml", "ant"
+    pos_obs_idx = (0, 1)           # torso x, y
+    joint_ids = slice(1, 9)        # 8 hinges after the free root joint
 
     def _raw_obs(self):
         return np.concatenate([self.data.qpos.flat[:15], self.data.qvel.flat[:14]])
@@ -85,11 +108,21 @@ class AntEnv(_SkillMujocoEnv):
     def _xy(self):
         return self.data.qpos[:2].copy()
 
+    @staticmethod
+    def orientation(raw):
+        return quat_to_euler(raw[..., 3:7])
+
+    @staticmethod
+    def joint_angles(raw):
+        return raw[..., 7:15]
+
 
 class HalfCheetahEnv(_SkillMujocoEnv):
     """obs = qpos + qvel, 18-D."""
 
     xml, name = "half_cheetah.xml", "half_cheetah"
+    pos_obs_idx = (0,)             # root x
+    joint_ids = slice(3, 9)        # 6 limb hinges after rootx, rootz, rooty
 
     def _raw_obs(self):
         return np.concatenate([self.data.qpos.flat, self.data.qvel.flat])
@@ -97,12 +130,28 @@ class HalfCheetahEnv(_SkillMujocoEnv):
     def _xy(self):
         return np.array([self.data.qpos[0], 0.0])
 
+    @staticmethod
+    def orientation(raw):
+        return raw[..., 2:3]       # body pitch (rooty)
+
+    @staticmethod
+    def joint_angles(raw):
+        return raw[..., 3:9]
+
 
 ENVS = {"ant": AntEnv, "half_cheetah": HalfCheetahEnv}
 
 
-def make_env(name: str, seed: int, normalize: bool = True) -> _SkillMujocoEnv:
-    env = ENVS[name](normalize=normalize)
+def encoder_input_idx(name: str, obs_dim: int, hide_pos: bool) -> list[int] | None:
+    """Observation indices the encoder phi sees: all of them, or all but the global position."""
+    if not hide_pos:
+        return None
+    return [i for i in range(obs_dim) if i not in ENVS[name].pos_obs_idx]
+
+
+def make_env(name: str, seed: int, normalize: bool = True, **kwargs) -> _SkillMujocoEnv:
+    """kwargs go to MujocoEnv, e.g. render_mode="rgb_array", width=256, height=256, camera_name="track"."""
+    env = ENVS[name](normalize=normalize, **kwargs)
     env.reset(seed=seed)
     env.action_space.seed(seed)
     return env

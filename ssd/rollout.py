@@ -3,11 +3,17 @@ import torch
 
 
 @torch.no_grad()
-def rollout(envs, policy, z: np.ndarray, horizon: int, device, deterministic: bool = False) -> dict[str, np.ndarray]:
-    """Run len(envs) episodes of `horizon` steps in lockstep, env i following skill z[i]."""
+def rollout(envs, policy, z: np.ndarray, horizon: int, device, deterministic: bool = False,
+            record_raw: bool = False, render: bool = False) -> dict[str, np.ndarray]:
+    """One episode per env in lockstep, env i with skill z[i].
+
+    record_raw adds the unnormalised states as "raw"; render adds "frames" (needs render_mode="rgb_array").
+    """
     n = len(envs)
     obs = np.stack([env.reset()[0] for env in envs])
     xy0 = np.stack([env.unwrapped._xy() for env in envs])
+    raw = [[env.unwrapped._raw_obs()] for env in envs] if record_raw else None
+    frames = [[env.render()] for env in envs] if render else None
     z_t = torch.as_tensor(z, dtype=torch.float32, device=device)
 
     obs_buf = np.empty((n, horizon + 1, obs.shape[-1]), dtype=np.float32)
@@ -25,7 +31,16 @@ def rollout(envs, policy, z: np.ndarray, horizon: int, device, deterministic: bo
             obs_buf[i, t + 1] = o
             xy_buf[i, t + 1] = info["next_coordinates"]
             done_buf[i, t] = float(terminated)  # time-limit truncation is not a terminal
-    return {"obs": obs_buf, "act": act_buf, "done": done_buf, "z": np.asarray(z, dtype=np.float32), "xy": xy_buf}
+            if record_raw:
+                raw[i].append(env.unwrapped._raw_obs())
+            if render:
+                frames[i].append(env.render())
+    out = {"obs": obs_buf, "act": act_buf, "done": done_buf, "z": np.asarray(z, dtype=np.float32), "xy": xy_buf}
+    if record_raw:
+        out["raw"] = np.asarray(raw, dtype=np.float32)
+    if render:
+        out["frames"] = np.asarray(frames, dtype=np.uint8)
+    return out
 
 
 SWEEP_ALPHAS = (-2.0, -1.0, 0.0, 1.0, 2.0)
@@ -50,9 +65,3 @@ def dimension_sweep(envs, policy, encoder, dim_skill: int, horizon: int, device,
         dphi.append((phi_k - phi_k[:, :1]).cpu().numpy())
         xy.append(traj["xy"])
     return {"xy": np.stack(xy), "dphi": np.stack(dphi), "alpha": alpha}
-
-
-def coverage(xy: np.ndarray, env_name: str) -> int:
-    """METRA's state-coverage metric: number of unique integer-floored (x, y) cells (x only for HalfCheetah)."""
-    dims = 1 if env_name == "half_cheetah" else 2
-    return len(np.unique(np.floor(xy.reshape(-1, 2)[:, :dims]), axis=0))

@@ -22,14 +22,21 @@ def mlp(in_dim: int, out_dim: int, hidden_dim: int, n_layers: int) -> nn.Sequent
 
 
 class Encoder(nn.Module):
-    """phi_theta: S -> R^K. Deterministic, as in METRA's inner-product parameterisation."""
+    """phi_theta: S -> R^K. Deterministic, as in METRA's inner-product parameterisation.
 
-    def __init__(self, obs_dim: int, dim_skill: int, hidden_dim: int, n_layers: int):
+    `input_idx` restricts phi to a subset of the observation (e.g. everything but the global position),
+    while callers keep passing full observations.
+    """
+
+    def __init__(self, obs_dim: int, dim_skill: int, hidden_dim: int, n_layers: int,
+                 input_idx: list[int] | None = None):
         super().__init__()
-        self.net = mlp(obs_dim, dim_skill, hidden_dim, n_layers)
+        idx = torch.arange(obs_dim) if input_idx is None else torch.as_tensor(input_idx, dtype=torch.long)
+        self.register_buffer("input_idx", idx)
+        self.net = mlp(len(idx), dim_skill, hidden_dim, n_layers)
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        return self.net(obs)
+        return self.net(obs.index_select(-1, self.input_idx))
 
 
 class TanhGaussianPolicy(nn.Module):
