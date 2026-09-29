@@ -65,6 +65,39 @@ Outputs go to `exp/<run_group>/<env>_K<K>_s<seed>_<time>/`:
 - `tb/`: TensorBoard logs.
 - `checkpoint.pt`: saved checkpoint.
 
+## Comparison with METRA
+
+`make_commands.py` mirrors METRA's benchmark: the same 5 environments, 8 seeds, training lengths
+and evaluation cadence. One METRA epoch (8 trajectories, then `trans_optimization_epochs` updates) is one
+SSD iteration.
+
+| Env | Obs | Skills | T | Updates / iter | Buffer | Iterations | Eval every |
+|---|---|---|---|---|---|---|---|
+| `ant` | state (29-D) | 2 continuous | 200 | 50 | 1M | 10,001 | 500 |
+| `half_cheetah` | state (18-D) | 16 discrete | 200 | 50 | 1M | 10,001 | 500 |
+| `dmc_quadruped` | 64x64 RGB x3, action repeat 2 | 4 continuous | 200 | 200 | 300k | 2,001 | 100 |
+| `dmc_humanoid` | 64x64 RGB x3, action repeat 2 | 2 continuous | 200 | 200 | 300k | 3,201 | 160 |
+| `kitchen` | 64x64 RGB x3 | 24 discrete, fixed α | 50 | 100 | 100k | 2,501 | 125 |
+
+```bash
+uv run make_commands.py --out commands/commands.txt            # 40 commands, one per (env, seed)
+CMDS=commands/commands.txt START=0 COUNT=8 sbatch --account=jincypjanardhanan run_commands.slurm
+```
+
+The ports needed to match METRA are listed below.
+- **Discrete skills** (`--discrete 1`): one-hot z, and the reward uses METRA's centred mask
+  (z − mean z)·K/(K−1). The SSD algorithm samples z ~ N(0, I_K); this mode exists only to match METRA's settings.
+- **DMC** (`ssd/dmc.py`, `ssd/custom_dmc_tasks/`): METRA's coloured-floor tasks on current `dm_control`.
+  The only change in METRA's task code is `np.in1d` → `np.isin` for NumPy 2.
+- **Kitchen** (`ssd/kitchen/`): the D4RL / RAPS end-effector kitchen and LEXA wrapper that METRA uses,
+  vendored with compatibility fixes only. It already runs on `dm_control` in METRA.
+- **Pixels**: every network (φ, policy, both critics) has its own copy of METRA's CNN. The replay buffer
+  stores single frames and rebuilds the 3-frame stacks when sampling.
+
+Cluster notes. The `a40` QOS allows 3 jobs of at most 2 GPUs per user, and `l40` / `dgx` allow 4 jobs of
+up to 4 GPUs. `debug` is often closed to new submissions. The `cccp` account is shared with the lab, so
+SSD jobs run under the personal account `jincypjanardhanan`.
+
 ## Mapping to the SSD algorithm
 
 | Part | Where |
