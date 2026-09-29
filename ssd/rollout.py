@@ -16,7 +16,8 @@ def rollout(envs, policy, z: np.ndarray, horizon: int, device, deterministic: bo
     frames = [[env.render()] for env in envs] if render else None
     z_t = torch.as_tensor(z, dtype=torch.float32, device=device)
 
-    obs_buf = np.empty((n, horizon + 1, obs.shape[-1]), dtype=np.float32)
+    obs_dtype = np.uint8 if envs[0].observation_space.dtype == np.uint8 else np.float32  # images stay uint8
+    obs_buf = np.empty((n, horizon + 1, obs.shape[-1]), dtype=obs_dtype)
     xy_buf = np.empty((n, horizon + 1, 2), dtype=np.float32)
     act_buf = np.empty((n, horizon, envs[0].action_space.shape[0]), dtype=np.float32)
     done_buf = np.zeros((n, horizon), dtype=np.float32)

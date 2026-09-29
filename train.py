@@ -21,7 +21,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from ssd.algorithm import SpectralSkillDiscovery, SSDConfig
 from ssd.buffer import TrajectoryBuffer
-from ssd.envs import ENVS, encoder_input_idx, make_env
+from ssd.envs import ALL_ENVS, encoder_input_idx, make_env
 from ssd.plotting import plot_dimension_sweeps, plot_spectrum, plot_trajectories
 from ssd.metrics import body_coverage, coverage
 from ssd.rollout import SWEEP_ALPHAS, dimension_sweep, rollout
@@ -29,7 +29,7 @@ from ssd.rollout import SWEEP_ALPHAS, dimension_sweep, rollout
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--env", default="ant", choices=sorted(ENVS))
+    p.add_argument("--env", default="ant", choices=ALL_ENVS)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--run_group", default="Debug")
@@ -85,7 +85,12 @@ class Logger:
         plt.close(fig)
 
 
-def sample_skills(rng, n: int, k: int, unit: bool) -> np.ndarray:
+def sample_skills(rng, n: int, k: int, unit: bool, discrete: bool = False, even: bool = False) -> np.ndarray:
+    """z ~ N(0, I_K) (SSD algorithm), optionally unit-length; or METRA's one-hot discrete skills.
+    even=True spreads discrete skills evenly over the n rollouts, as METRA's evaluation does."""
+    if discrete:
+        idx = np.arange(n) % k if even else rng.integers(k, size=n)
+        return np.eye(k, dtype=np.float32)[idx]
     z = rng.standard_normal((n, k))
     return z / np.linalg.norm(z, axis=1, keepdims=True) if unit else z
 
@@ -97,6 +102,7 @@ def main():
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
     torch.set_float32_matmul_precision("high")
+    torch.backends.cudnn.benchmark = True
 
     run_name = f"{args.env}_K{cfg.dim_skill}_s{args.seed}_{time.strftime('%Y%m%d-%H%M%S')}"
     log_dir = Path(args.exp_dir) / args.run_group / run_name
@@ -112,10 +118,16 @@ def main():
     obs_dim = train_envs[0].observation_space.shape[0]
     space = train_envs[0].action_space
     k = cfg.dim_skill
+    pixel_shape = getattr(train_envs[0], "pixel_shape", None)
+    action_repeat = getattr(train_envs[0], "action_repeat", 1)
+    has_body = hasattr(eval_envs[0], "joint_range")
 
     agent = SpectralSkillDiscovery(cfg, obs_dim, space.shape[0], space.low, space.high, device, seed=args.seed,
-                                   encoder_input_idx=encoder_input_idx(args.env, obs_dim, bool(args.encoder_hide_pos)))
-    buffer = TrajectoryBuffer(args.buffer_size, args.horizon, obs_dim, space.shape[0], k, device)
+                                   encoder_input_idx=encoder_input_idx(args.env, obs_dim, bool(args.encoder_hide_pos)),
+                                   pixel_shape=pixel_shape)
+    buffer = TrajectoryBuffer(args.buffer_size, args.horizon, obs_dim, space.shape[0], k, device,
+                              frame_stack=pixel_shape[0] // 3 if pixel_shape else 1,
+                              obs_dtype=torch.uint8 if pixel_shape else torch.float32)
 
     env_steps = 0
     sums: dict[str, torch.Tensor] = defaultdict(lambda: torch.zeros((), device=device))
@@ -124,10 +136,10 @@ def main():
 
     for it in range(1, args.n_iters + 1):
         # rollouts
-        z = sample_skills(rng, args.rollouts_per_iter, k, bool(args.unit_skills))
+        z = sample_skills(rng, args.rollouts_per_iter, k, bool(args.unit_skills), cfg.discrete)
         traj = rollout(train_envs, agent.policy, z, args.horizon, device)
         buffer.add(traj["obs"], traj["act"], traj["done"], traj["z"])
-        env_steps += args.rollouts_per_iter * args.horizon
+        env_steps += args.rollouts_per_iter * args.horizon * action_repeat
 
         # updates
         if buffer.n_transitions >= args.min_buffer_size:
@@ -158,18 +170,25 @@ def main():
                 row[f"spectrum/R_{i + 1}"] = spec.returns[i].item()
                 row[f"spectrum/floor_{i + 1}"] = spec.floor[i].item()
 
-            ez = sample_skills(rng, args.n_eval_rollouts, k, bool(args.unit_skills))
-            ev = rollout(eval_envs, agent.policy, ez, args.horizon, device, deterministic=True, record_raw=True)
+            ez = sample_skills(rng, args.n_eval_rollouts, k, bool(args.unit_skills), cfg.discrete, even=True)
+            ev = rollout(eval_envs, agent.policy, ez, args.horizon, device, deterministic=True, record_raw=has_body)
             row["eval/coverage"] = coverage(ev["xy"], args.env)
-            row.update({f"eval/{key}": val for key, val in body_coverage(ev["raw"], eval_envs[0]).items()})
+            if has_body:
+                row.update({f"eval/{key}": val for key, val in body_coverage(ev["raw"], eval_envs[0]).items()})
+            if args.env == "kitchen":
+                from ssd.kitchen.env import kitchen_metrics
+
+                row.update({f"eval/{key}": val for key, val in kitchen_metrics(eval_envs).items()})
             logger.scalars("eval", env_steps, row)
             logger.figure("spectrum", plot_spectrum(spec), env_steps)
             logger.figure("trajectories", plot_trajectories(ev["xy"], ez, args.env, args.eval_plot_axis), env_steps)
-            sweep = dimension_sweep(eval_envs[:2 * len(SWEEP_ALPHAS)], agent.policy, agent.encoder, k,
-                                    args.horizon, device)
-            logger.figure("sweeps", plot_dimension_sweeps(sweep, args.env, args.eval_plot_axis), env_steps)
+            if not cfg.discrete:
+                sweep = dimension_sweep(eval_envs[:2 * len(SWEEP_ALPHAS)], agent.policy, agent.encoder, k,
+                                        args.horizon, device)
+                logger.figure("sweeps", plot_dimension_sweeps(sweep, args.env, args.eval_plot_axis), env_steps)
             print(f"[eval] it {it} | K* = {spec.k_star} | coverage {row['eval/coverage']} "
-                  f"| orientation {row['eval/orientation_coverage']} | posture {row['eval/posture_coverage']} "
+                  f"| orientation {row.get('eval/orientation_coverage', '-')} | posture {row.get('eval/posture_coverage', '-')} "
+                  f"| kitchen {row.get('eval/KitchenOverall', '-')} "
                   f"| R = {np.array2string(spec.returns.cpu().numpy(), precision=3)}", flush=True)
 
         if it % args.n_save == 0 or it == args.n_iters:

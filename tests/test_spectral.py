@@ -77,6 +77,17 @@ def test_readout_recovers_leading_dimensions():
     assert spec.sigma2.shape == (k,)
 
 
+def test_discrete_skill_weights_match_metra_mask():
+    """METRA's discrete reward uses (z - mean(z)) * K / (K - 1): +1 on the chosen skill, -1/(K-1) elsewhere."""
+    cfg = SSDConfig(dim_skill=4, discrete=True, hidden_dim=8)
+    agent = SpectralSkillDiscovery(cfg, obs_dim=3, act_dim=1, act_low=[-1], act_high=[1], device="cpu")
+    w = agent.skill_weights(torch.eye(4)[[2]])
+    torch.testing.assert_close(w, torch.tensor([[-1 / 3, -1 / 3, 1.0, -1 / 3]]))
+    z = torch.randn(5, 4)
+    agent.cfg.discrete = False
+    assert torch.equal(agent.skill_weights(z), z)
+
+
 def test_agent_update_and_duals():
     torch.manual_seed(0)
     cfg = SSDConfig(dim_skill=3, hidden_dim=32, batch_size=64, n_dual=1, n_readout_trajs=8, n_shuffles=50)

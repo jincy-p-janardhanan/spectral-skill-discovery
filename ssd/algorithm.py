@@ -14,6 +14,7 @@ from ssd.sac import SAC
 @dataclass
 class SSDConfig:
     dim_skill: int = 8                 # K
+    discrete: bool = False             # one-hot skills with METRA's centred mask
     hidden_dim: int = 1024
     n_layers: int = 2
     batch_size: int = 256
@@ -50,12 +51,12 @@ class SSDConfig:
 
 class SpectralSkillDiscovery:
     def __init__(self, cfg: SSDConfig, obs_dim: int, act_dim: int, act_low, act_high, device, seed: int = 0,
-                 encoder_input_idx: list[int] | None = None):
+                 encoder_input_idx: list[int] | None = None, pixel_shape=None):
         self.cfg = cfg
         self.device = device
         k = cfg.dim_skill
 
-        self.encoder = Encoder(obs_dim, k, cfg.hidden_dim, cfg.n_layers, encoder_input_idx).to(device)
+        self.encoder = Encoder(obs_dim, k, cfg.hidden_dim, cfg.n_layers, encoder_input_idx, pixel_shape).to(device)
         self.target_encoder = copy.deepcopy(self.encoder).requires_grad_(False)
         self.encoder_opt = torch.optim.Adam(self.encoder.parameters(), lr=cfg.lr_theta)
 
@@ -64,7 +65,7 @@ class SpectralSkillDiscovery:
             hidden_dim=cfg.hidden_dim, n_layers=cfg.n_layers,
             lr_actor=cfg.lr_actor, lr_critic=cfg.lr_critic, lr_alpha=cfg.lr_alpha,
             alpha_init=cfg.alpha_init, tau=cfg.sac_tau, gamma=cfg.gamma,
-            target_coef=cfg.target_coef, device=device,
+            target_coef=cfg.target_coef, device=device, pixel_shape=pixel_shape,
         )
 
         # beta is stored flat over the pairs j < k
@@ -93,6 +94,14 @@ class SpectralSkillDiscovery:
         phi = encoder(torch.cat([batch["obs"], batch["next_obs"]], dim=0))
         return phi.chunk(2, dim=0)
 
+    def skill_weights(self, z: torch.Tensor) -> torch.Tensor:
+        """The vector phi-differences are projected on: z itself, or for discrete skills METRA's centred
+        one-hot mask (z - mean(z)) * K / (K - 1), so each skill pushes phi along its own axis and away from the rest."""
+        if not self.cfg.discrete:
+            return z
+        k = z.shape[-1]
+        return (z - z.mean(dim=-1, keepdim=True)) * k / max(k - 1, 1)
+
     def update(self, buffer: TrajectoryBuffer) -> dict[str, torch.Tensor]:
         cfg = self.cfg
 
@@ -100,7 +109,7 @@ class SpectralSkillDiscovery:
         b = buffer.sample_transitions(cfg.batch_size)
         with torch.no_grad():
             reward_enc = self.target_encoder if cfg.reward_use_target else self.encoder
-            reward = spectral.skill_objective(*self._encode_pair(reward_enc, b), b["z"])
+            reward = spectral.skill_objective(*self._encode_pair(reward_enc, b), self.skill_weights(b["z"]))
         metrics = self.sac.update(b["obs"], b["act"], b["next_obs"], b["z"], reward * cfg.scale_reward, b["done"])
 
         # encoder update on two independent batches
@@ -110,7 +119,7 @@ class SpectralSkillDiscovery:
         c1, h1 = self._constraints(phi1_s, phi1_next)
         with torch.no_grad():
             c2, h2 = self._constraints(*self._encode_pair(self.encoder, b2))
-        j_hat = spectral.skill_objective(phi1_s, phi1_next, b1["z"]).mean()
+        j_hat = spectral.skill_objective(phi1_s, phi1_next, self.skill_weights(b1["z"])).mean()
 
         lagrangian = spectral.lagrangian(j_hat, c1, h1, c2, h2, self.beta, self.nu, self.c)
         self.encoder_opt.zero_grad(set_to_none=True)
@@ -150,8 +159,10 @@ class SpectralSkillDiscovery:
         obs, z = buffer.sample_trajectories(cfg.n_readout_trajs)
         enc = self.target_encoder if cfg.readout_use_target else self.encoder
         n, t1, d = obs.shape
-        phi = enc(obs.reshape(n * t1, d)).reshape(n, t1, -1)
-        return spectral.spectrum_readout(phi, z, cfg.n_shuffles, cfg.readout_quantile, self.readout_gen)
+        flat = obs.reshape(n * t1, d)
+        phi = torch.cat([enc(chunk) for chunk in flat.split(2048)]).reshape(n, t1, -1)
+        return spectral.spectrum_readout(phi, self.skill_weights(z), cfg.n_shuffles, cfg.readout_quantile,
+                                         self.readout_gen)
 
     def state_dict(self):
         return {

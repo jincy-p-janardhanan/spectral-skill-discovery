@@ -11,9 +11,10 @@ from ssd.networks import DoubleQ, TanhGaussianPolicy
 
 class SAC:
     def __init__(self, *, obs_dim, dim_skill, act_dim, act_low, act_high, hidden_dim, n_layers,
-                 lr_actor, lr_critic, lr_alpha, alpha_init, tau, gamma, target_coef, device):
-        self.policy = TanhGaussianPolicy(obs_dim, dim_skill, act_dim, hidden_dim, n_layers, act_low, act_high).to(device)
-        self.critic = DoubleQ(obs_dim, dim_skill, act_dim, hidden_dim, n_layers).to(device)
+                 lr_actor, lr_critic, lr_alpha, alpha_init, tau, gamma, target_coef, device, pixel_shape=None):
+        self.policy = TanhGaussianPolicy(obs_dim, dim_skill, act_dim, hidden_dim, n_layers, act_low, act_high,
+                                         pixel_shape).to(device)
+        self.critic = DoubleQ(obs_dim, dim_skill, act_dim, hidden_dim, n_layers, pixel_shape).to(device)
         self.critic_target = copy.deepcopy(self.critic).requires_grad_(False)
         self.log_alpha = torch.tensor(math.log(alpha_init), device=device, requires_grad=True)
 

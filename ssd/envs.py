@@ -149,8 +149,23 @@ def encoder_input_idx(name: str, obs_dim: int, hide_pos: bool) -> list[int] | No
     return [i for i in range(obs_dim) if i not in ENVS[name].pos_obs_idx]
 
 
-def make_env(name: str, seed: int, normalize: bool = True, **kwargs) -> _SkillMujocoEnv:
-    """kwargs go to MujocoEnv, e.g. render_mode="rgb_array", width=256, height=256, camera_name="track"."""
+PIXEL_ENVS = ("dmc_quadruped", "dmc_humanoid", "kitchen")
+ALL_ENVS = (*ENVS, *PIXEL_ENVS)
+
+
+def make_env(name: str, seed: int, normalize: bool = True, **kwargs):
+    """kwargs go to MujocoEnv (e.g. render_mode="rgb_array"); pixel envs ignore them and normalize."""
+    if name in PIXEL_ENVS:
+        if name == "kitchen":
+            from ssd.kitchen.env import KitchenPixelEnv
+
+            env = KitchenPixelEnv(seed)
+        else:
+            from ssd.dmc import DMCPixelEnv
+
+            env = DMCPixelEnv(name, seed)
+        env.action_space.seed(seed)
+        return env
     env = ENVS[name](normalize=normalize, **kwargs)
     env.reset(seed=seed)
     env.action_space.seed(seed)
