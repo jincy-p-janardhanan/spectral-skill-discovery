@@ -13,6 +13,8 @@ dependencies = [
     "tensorboard>=2.21.0",
     "imageio[ffmpeg]>=2.37.4",
     "pillow>=12.3.0",
+    "dm-control>=1.0.47",
+    "gymnasium-robotics>=1.4.2",
 ]
 
 [dependency-groups]
@@ -36,3 +38,7 @@ torch = { index = "pytorch-cu126" }
 name = "pytorch-cu126"
 url = "https://download.pytorch.org/whl/cu126"
 explicit = true
+
+[tool.uv]
+# labmaze (dm-control's maze tasks, unused) has no Python 3.14 wheel
+override-dependencies = ["labmaze ; sys_platform == 'never'"]
