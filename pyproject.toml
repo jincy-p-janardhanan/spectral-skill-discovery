@@ -15,6 +15,7 @@ dependencies = [
     "pillow>=12.3.0",
     "dm-control>=1.0.47",
     "gymnasium-robotics>=1.4.2",
+    "numpy-quaternion>=2024.0.13",
 ]
 
 [dependency-groups]

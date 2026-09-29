@@ -19,3 +19,6 @@ figures/
 
 plot_results.py
 visualize.py
+ssd/kitchen/adept_envs/.pylintrc
+ssd/kitchen/adept_envs/.style.yapf
+ssd/kitchen/adept_models/CONTRIBUTING.public.md
