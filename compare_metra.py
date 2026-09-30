@@ -72,6 +72,8 @@ def read_csv(path) -> dict[str, np.ndarray]:
     with open(path) as f:
         rows = list(csv.DictReader(f))
     out = {}
+    if not rows:
+        return out
     for k in rows[0]:
         vals = []
         for r in rows:
