@@ -11,22 +11,22 @@ COMMON = "--rollouts_per_iter 8 --min_buffer_size 10000 --n_log 100 --n_save 250
 
 ENVS = {
     # METRA: --dim_option 2 --discrete 0 --trans_optimization_epochs 50 --sac_max_buffer_size 1000000
-    "ant": "--env ant --horizon 200 --dim_skill 2 --discrete 0 --updates_per_iter 50 --buffer_size 1000000 "
-           "--eval_plot_axis 50",
+    "ant": "--env ant --horizon 200 --dim_skill 2 --discrete 0 --unit_skills 1 --updates_per_iter 50 "
+           "--buffer_size 1000000 --eval_plot_axis 50",
     # METRA: --dim_option 16 --discrete 1 --trans_optimization_epochs 50 --sac_max_buffer_size 1000000
     "half_cheetah": "--env half_cheetah --horizon 200 --dim_skill 16 --discrete 1 --updates_per_iter 50 "
                     "--buffer_size 1000000",
     # METRA: pixels, --frame_stack 3, action repeat 2, --dim_option 4, --trans_optimization_epochs 200,
     # --sac_max_buffer_size 300000, --n_epochs_per_log 25
-    "dmc_quadruped": "--env dmc_quadruped --horizon 200 --dim_skill 4 --discrete 0 --updates_per_iter 200 "
+    "dmc_quadruped": "--env dmc_quadruped --horizon 200 --dim_skill 4 --discrete 0 --unit_skills 1 --updates_per_iter 200 "
                      "--buffer_size 300000 --eval_plot_axis 15 --n_readout_trajs 128 --n_log 25",
     # METRA: as Quadruped with --dim_option 2
-    "dmc_humanoid": "--env dmc_humanoid --horizon 200 --dim_skill 2 --discrete 0 --updates_per_iter 200 "
+    "dmc_humanoid": "--env dmc_humanoid --horizon 200 --dim_skill 2 --discrete 0 --unit_skills 1 --updates_per_iter 200 "
                     "--buffer_size 300000 --eval_plot_axis 15 --n_readout_trajs 128 --n_log 25",
     # METRA: pixels, --max_path_length 50, --dim_option 24 --discrete 1, --trans_optimization_epochs 100,
     # --sac_max_buffer_size 100000, --sac_lr_a -1 (fixed temperature), --n_epochs_per_log 25
     "kitchen": "--env kitchen --horizon 50 --dim_skill 24 --discrete 1 --updates_per_iter 100 "
-               "--buffer_size 100000 --lr_alpha 0 --n_readout_trajs 128 --n_log 25",
+               "--buffer_size 100000 --lr_alpha 0 --n_readout_trajs 128 --n_log 25 --n_eval_envs 8",
 }
 
 # training length and evaluation period of METRA's benchmark, in METRA epochs = SSD iterations
@@ -37,7 +37,7 @@ N_EVAL = {"ant": 500, "half_cheetah": 500, "dmc_quadruped": 100, "dmc_humanoid":
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--out", default="commands/commands.txt")
-    p.add_argument("--run_group", default="Paper")
+    p.add_argument("--run_group", default="PaperV2")
     p.add_argument("--seeds", type=int, nargs="+", default=list(range(8)))
     p.add_argument("--envs", nargs="+", default=list(ENVS))
     p.add_argument("--smoke", action="store_true", help="one short run per environment")
