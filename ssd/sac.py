@@ -77,3 +77,13 @@ class SAC:
             "critic_opt": self.critic_opt.state_dict(),
             "alpha_opt": self.alpha_opt.state_dict(),
         }
+
+    def load_state_dict(self, state):
+        self.policy.load_state_dict(state["policy"])
+        self.critic.load_state_dict(state["critic"])
+        self.critic_target.load_state_dict(state["critic_target"])
+        with torch.no_grad():
+            self.log_alpha.copy_(state["log_alpha"].to(self.log_alpha.device))
+        self.actor_opt.load_state_dict(state["actor_opt"])
+        self.critic_opt.load_state_dict(state["critic_opt"])
+        self.alpha_opt.load_state_dict(state["alpha_opt"])

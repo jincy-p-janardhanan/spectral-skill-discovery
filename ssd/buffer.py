@@ -60,3 +60,17 @@ class TrajectoryBuffer:
         i = torch.randperm(self.size, device=self.device)[:n]
         t = torch.arange(self.horizon + 1, device=self.device)
         return self._stacked(i.unsqueeze(-1).expand(-1, len(t)), t.expand(len(i), -1)), self.z[i]
+
+    def state_dict(self) -> dict:
+        n = self.size
+        return {"obs": self.obs[:n].cpu(), "act": self.act[:n].cpu(), "done": self.done[:n].cpu(),
+                "z": self.z[:n].cpu(), "ptr": self.ptr, "size": self.size}
+
+    def load_state_dict(self, state: dict):
+        n = state["size"]
+        assert n <= self.n_max, f"saved buffer holds {n} trajectories, capacity is {self.n_max}"
+        self.obs[:n] = state["obs"].to(self.device)
+        self.act[:n] = state["act"].to(self.device)
+        self.done[:n] = state["done"].to(self.device)
+        self.z[:n] = state["z"].to(self.device)
+        self.ptr, self.size = state["ptr"], n

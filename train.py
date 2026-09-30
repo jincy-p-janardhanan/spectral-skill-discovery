@@ -10,6 +10,7 @@ import argparse
 import csv
 import dataclasses
 import json
+import os
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -52,6 +53,10 @@ def parse_args():
     p.add_argument("--n_save", type=int, default=10_000, help="checkpoint period (iterations)")
     p.add_argument("--n_eval_rollouts", type=int, default=48, help="deterministic rollouts for plots / coverage")
     p.add_argument("--eval_plot_axis", type=float, default=None, help="half-width of the trajectory plot")
+    p.add_argument("--resume", type=int, default=0,
+                   help="1: deterministic run directory <env>_K<K>_s<seed>; if it holds resume.pt, continue from it")
+    p.add_argument("--resume_every_min", type=float, default=30.0,
+                   help="with --resume 1, write resume.pt (agent, optimisers, replay buffer, RNGs) this often")
 
     # one flag per SSDConfig field
     for f in dataclasses.fields(SSDConfig):
@@ -61,10 +66,24 @@ def parse_args():
 
 
 class Logger:
-    def __init__(self, log_dir: Path):
+    def __init__(self, log_dir: Path, resume_iter: int | None = None, purge_step: int | None = None):
         self.dir = log_dir
-        self.tb = SummaryWriter(log_dir / "tb")
+        self.tb = SummaryWriter(log_dir / "tb", purge_step=purge_step)
         self._files = {}
+        # resume_iter: keep CSV rows up to this iteration and append to them.
+        if resume_iter is not None:
+            for path in log_dir.glob("*.csv"):
+                with path.open(newline="") as old:
+                    reader = csv.DictReader(old)
+                    fields, rows = reader.fieldnames, [r for r in reader if float(r["iter"]) <= resume_iter]
+                if not fields:
+                    continue
+                f = path.open("w", newline="")
+                writer = csv.DictWriter(f, fieldnames=fields)
+                writer.writeheader()
+                writer.writerows(rows)
+                f.flush()
+                self._files[path.stem] = (f, writer)
 
     def scalars(self, name: str, step: int, row: dict[str, float]):
         for k, v in row.items():
@@ -115,16 +134,27 @@ def main():
     torch.set_float32_matmul_precision("high")
     torch.backends.cudnn.benchmark = True
 
-    run_name = f"{args.env}_K{cfg.dim_skill}_s{args.seed}_{time.strftime('%Y%m%d-%H%M%S')}"
+    run_name = f"{args.env}_K{cfg.dim_skill}_s{args.seed}"
+    if not args.resume:
+        run_name += f"_{time.strftime('%Y%m%d-%H%M%S')}"
     log_dir = Path(args.exp_dir) / args.run_group / run_name
-    log_dir.mkdir(parents=True)
-    (log_dir / "config.json").write_text(json.dumps(vars(args), indent=2))
-    logger = Logger(log_dir)
-    print(f"Logging to {log_dir}")
+    resume_path = log_dir / "resume.pt"
+    state = None
+    if args.resume and resume_path.exists():
+        state = torch.load(resume_path, map_location=device, weights_only=False)
+    log_dir.mkdir(parents=True, exist_ok=bool(args.resume))
+    if state is None:
+        (log_dir / "config.json").write_text(json.dumps(vars(args), indent=2))
+    start_it = state["iter"] if state else 0
+    logger = Logger(log_dir, resume_iter=start_it if args.resume else None,
+                    purge_step=state["env_steps"] + 1 if state else None)
+    print(f"Logging to {log_dir}" + (f" (resuming after iteration {start_it})" if state else ""), flush=True)
 
-    train_envs = [make_env(args.env, seed=args.seed * 10_000 + i, normalize=bool(args.normalize_obs))
+    seed_offset = 100_003 * start_it  # fresh env seeds after a resume
+    train_envs = [make_env(args.env, seed=args.seed * 10_000 + i + seed_offset, normalize=bool(args.normalize_obs))
                   for i in range(args.rollouts_per_iter)]
-    eval_envs = [make_env(args.env, seed=args.seed * 10_000 + 5_000 + i, normalize=bool(args.normalize_obs))
+    eval_envs = [make_env(args.env, seed=args.seed * 10_000 + 5_000 + i + seed_offset,
+                          normalize=bool(args.normalize_obs))
                  for i in range(args.n_eval_rollouts)]
     obs_dim = train_envs[0].observation_space.shape[0]
     space = train_envs[0].action_space
@@ -141,11 +171,22 @@ def main():
                               obs_dtype=torch.uint8 if pixel_shape else torch.float32)
 
     env_steps = 0
+    elapsed_before = 0.0
+    if state is not None:
+        agent.load_state_dict(state["agent"])
+        buffer.load_state_dict(state["buffer"])
+        rng.bit_generator.state = state["np_rng"]
+        torch.set_rng_state(state["torch_rng"])
+        if torch.cuda.is_available() and state.get("cuda_rng") is not None:
+            torch.cuda.set_rng_state_all(state["cuda_rng"])
+        env_steps, elapsed_before = state["env_steps"], state["elapsed_s"]
+        del state
     sums: dict[str, torch.Tensor] = defaultdict(lambda: torch.zeros((), device=device))
     n_summed = 0
-    t_start = time.time()
+    t_start = time.time() - elapsed_before
+    last_resume_save = time.time()
 
-    for it in range(1, args.n_iters + 1):
+    for it in range(start_it + 1, args.n_iters + 1):
         # rollouts
         z = sample_skills(rng, args.rollouts_per_iter, k, bool(args.unit_skills), cfg.discrete)
         traj = rollout(train_envs, agent.policy, z, args.horizon, device)
@@ -207,6 +248,17 @@ def main():
             torch.save(ckpt, log_dir / "checkpoint.pt")
             (log_dir / "checkpoints").mkdir(exist_ok=True)
             torch.save(ckpt, log_dir / "checkpoints" / f"ckpt_{env_steps:09d}.pt")
+
+        if args.resume and (time.time() - last_resume_save >= 60 * args.resume_every_min or it == args.n_iters):
+            snapshot = {"iter": it, "env_steps": env_steps, "elapsed_s": time.time() - t_start,
+                        "agent": agent.state_dict(), "buffer": buffer.state_dict(),
+                        "np_rng": rng.bit_generator.state, "torch_rng": torch.get_rng_state(),
+                        "cuda_rng": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None}
+            tmp = resume_path.with_suffix(".tmp")
+            torch.save(snapshot, tmp)
+            os.replace(tmp, resume_path)
+            del snapshot
+            last_resume_save = time.time()
 
 
 if __name__ == "__main__":

@@ -174,4 +174,17 @@ class SpectralSkillDiscovery:
             "nu": self.nu.cpu(),
             "c": self.c,
             "n_updates": self.n_updates,
+            "readout_gen": self.readout_gen.get_state(),
         }
+
+    def load_state_dict(self, state):
+        self.encoder.load_state_dict(state["encoder"])
+        self.target_encoder.load_state_dict(state["target_encoder"])
+        self.encoder_opt.load_state_dict(state["encoder_opt"])
+        self.sac.load_state_dict(state["sac"])
+        self.beta = state["beta"].to(self.device)
+        self.nu = state["nu"].to(self.device)
+        self.c = state["c"]
+        self.n_updates = state["n_updates"]
+        if "readout_gen" in state:
+            self.readout_gen.set_state(state["readout_gen"])

@@ -7,7 +7,7 @@
 import argparse
 from pathlib import Path
 
-COMMON = "--rollouts_per_iter 8 --min_buffer_size 10000 --n_log 100 --n_save 2500"
+COMMON = "--rollouts_per_iter 8 --min_buffer_size 10000 --n_log 100 --n_save 2500 --resume 1"
 
 ENVS = {
     # METRA: --dim_option 2 --discrete 0 --trans_optimization_epochs 50 --sac_max_buffer_size 1000000
