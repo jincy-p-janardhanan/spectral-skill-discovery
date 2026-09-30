@@ -25,7 +25,7 @@ from ssd.buffer import TrajectoryBuffer
 from ssd.envs import ALL_ENVS, encoder_input_idx, make_env
 from ssd.plotting import plot_dimension_sweeps, plot_spectrum, plot_trajectories
 from ssd.metrics import body_coverage, coverage
-from ssd.rollout import SWEEP_ALPHAS, dimension_sweep, rollout
+from ssd.rollout import SWEEP_ALPHAS, dimension_sweep, rollout, rollout_chunked
 
 
 def parse_args():
@@ -52,6 +52,8 @@ def parse_args():
     p.add_argument("--n_eval", type=int, default=1000, help="n_eval: spectrum readout / eval period (iterations)")
     p.add_argument("--n_save", type=int, default=10_000, help="checkpoint period (iterations)")
     p.add_argument("--n_eval_rollouts", type=int, default=48, help="deterministic rollouts for plots / coverage")
+    p.add_argument("--n_eval_envs", type=int, default=None,
+                   help="evaluation env pool, reused in chunks (default: one env per evaluation rollout)")
     p.add_argument("--eval_plot_axis", type=float, default=None, help="half-width of the trajectory plot")
     p.add_argument("--resume", type=int, default=0,
                    help="1: deterministic run directory <env>_K<K>_s<seed>; if it holds resume.pt, continue from it")
@@ -115,12 +117,21 @@ class Logger:
         plt.close(fig)
 
 
-def sample_skills(rng, n: int, k: int, unit: bool, discrete: bool = False, even: bool = False) -> np.ndarray:
-    """z ~ N(0, I_K) (SSD algorithm), optionally unit-length; or METRA's one-hot discrete skills.
-    even=True spreads discrete skills evenly over the n rollouts, as METRA's evaluation does."""
+def sample_skills(rng, n: int, k: int, unit: bool, discrete: bool = False, even: bool = False,
+                  signed: bool = False, cube: bool = False) -> np.ndarray:
+    """z ~ N(0, I_K), optionally unit-length, or discrete skills: one-hot, signed (+-e_k) or cube corners.
+
+    even=True cycles through the discrete skills instead of sampling them.
+    """
+    if discrete and cube:
+        idx = np.arange(n) % 2 ** k if even else rng.integers(2 ** k, size=n)
+        bits = (idx[:, None] >> np.arange(k)) & 1
+        return ((2 * bits - 1) / np.sqrt(k)).astype(np.float32)
     if discrete:
-        idx = np.arange(n) % k if even else rng.integers(k, size=n)
-        return np.eye(k, dtype=np.float32)[idx]
+        m = 2 * k if signed else k
+        idx = np.arange(n) % m if even else rng.integers(m, size=n)
+        sign = np.where(idx < k, 1.0, -1.0).astype(np.float32)
+        return np.eye(k, dtype=np.float32)[idx % k] * sign[:, None]
     z = rng.standard_normal((n, k))
     return z / np.linalg.norm(z, axis=1, keepdims=True) if unit else z
 
@@ -155,7 +166,7 @@ def main():
                   for i in range(args.rollouts_per_iter)]
     eval_envs = [make_env(args.env, seed=args.seed * 10_000 + 5_000 + i + seed_offset,
                           normalize=bool(args.normalize_obs))
-                 for i in range(args.n_eval_rollouts)]
+                 for i in range(args.n_eval_envs or args.n_eval_rollouts)]
     obs_dim = train_envs[0].observation_space.shape[0]
     space = train_envs[0].action_space
     k = cfg.dim_skill
@@ -188,7 +199,8 @@ def main():
 
     for it in range(start_it + 1, args.n_iters + 1):
         # rollouts
-        z = sample_skills(rng, args.rollouts_per_iter, k, bool(args.unit_skills), cfg.discrete)
+        z = sample_skills(rng, args.rollouts_per_iter, k, bool(args.unit_skills), cfg.discrete,
+                          signed=cfg.signed_skills, cube=cfg.cube_skills)
         traj = rollout(train_envs, agent.policy, z, args.horizon, device)
         buffer.add(traj["obs"], traj["act"], traj["done"], traj["z"])
         env_steps += args.rollouts_per_iter * args.horizon * action_repeat
@@ -222,15 +234,17 @@ def main():
                 row[f"spectrum/R_{i + 1}"] = spec.returns[i].item()
                 row[f"spectrum/floor_{i + 1}"] = spec.floor[i].item()
 
-            ez = sample_skills(rng, args.n_eval_rollouts, k, bool(args.unit_skills), cfg.discrete, even=True)
-            ev = rollout(eval_envs, agent.policy, ez, args.horizon, device, deterministic=True, record_raw=has_body)
+            ez = sample_skills(rng, args.n_eval_rollouts, k, bool(args.unit_skills), cfg.discrete, even=True,
+                               signed=cfg.signed_skills, cube=cfg.cube_skills)
+            ev = rollout_chunked(eval_envs, agent.policy, ez, args.horizon, device, deterministic=True,
+                                 record_raw=has_body)
             row["eval/coverage"] = coverage(ev["xy"], args.env)
             if has_body:
                 row.update({f"eval/{key}": val for key, val in body_coverage(ev["raw"], eval_envs[0]).items()})
             if args.env == "kitchen":
                 from ssd.kitchen.env import kitchen_metrics
 
-                row.update({f"eval/{key}": val for key, val in kitchen_metrics(eval_envs).items()})
+                row.update({f"eval/{key}": val for key, val in kitchen_metrics(ev["success"]).items()})
             logger.scalars("eval", env_steps, row)
             logger.figure("spectrum", plot_spectrum(spec), env_steps)
             logger.figure("trajectories", plot_trajectories(ev["xy"], ez, args.env, args.eval_plot_axis), env_steps)

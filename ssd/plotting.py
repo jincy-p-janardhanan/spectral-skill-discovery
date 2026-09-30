@@ -10,12 +10,18 @@ from ssd.spectral import Spectrum
 
 
 def skill_colors(z: np.ndarray) -> np.ndarray:
-    """Hue from the angle of the two leading skill dims, saturation from their norm.
-    One-hot (discrete) skills get one distinct colour per skill instead."""
-    if np.all((z == 0) | (z == 1)) and np.all(z.sum(axis=1) == 1):
-        idx, k = z.argmax(axis=1), z.shape[1]
+    """Hue and saturation from the first two skill dims, or one colour per discrete skill."""
+    if np.all((z == 0) | (np.abs(z) == 1)) and np.all(np.abs(z).sum(axis=1) == 1):
+        k = z.shape[1]
+        idx = np.abs(z).argmax(axis=1)
+        if np.any(z < 0):  # signed skills
+            idx, k = idx + k * (z.min(axis=1) < 0), 2 * k
         if k <= 20:
             return plt.get_cmap("tab20" if k > 10 else "tab10")(idx)[:, :3]
+        return mcolors.hsv_to_rgb(np.c_[idx / k, np.full(len(z), 0.75), np.full(len(z), 0.85)])
+    a = np.abs(z)
+    if z.shape[1] > 2 and np.allclose(a, a.max()):  # cube skills
+        idx, k = ((z > 0) * (1 << np.arange(z.shape[1]))).sum(axis=1), 2 ** z.shape[1]
         return mcolors.hsv_to_rgb(np.c_[idx / k, np.full(len(z), 0.75), np.full(len(z), 0.85)])
     z2 = z[:, :2] if z.shape[1] >= 2 else np.c_[z[:, 0], np.zeros(len(z))]
     hue = (np.arctan2(z2[:, 1], z2[:, 0]) / (2 * np.pi)) % 1.0

@@ -88,6 +88,20 @@ def test_discrete_skill_weights_match_metra_mask():
     assert torch.equal(agent.skill_weights(z), z)
 
 
+def test_signed_discrete_skills():
+    """Signed skills: 2K skills z = +-e_k, spread evenly for evaluation, and the reward projects on z itself."""
+    from train import sample_skills
+
+    z = sample_skills(None, 8, 4, unit=False, discrete=True, even=True, signed=True)
+    torch.testing.assert_close(torch.as_tensor(z), torch.cat([torch.eye(4), -torch.eye(4)]))
+    z = sample_skills(__import__("numpy").random.default_rng(0), 100, 4, unit=False, discrete=True, signed=True)
+    assert set(map(tuple, z.tolist())) <= set(map(tuple, torch.cat([torch.eye(4), -torch.eye(4)]).tolist()))
+    cfg = SSDConfig(dim_skill=4, discrete=True, signed_skills=True, hidden_dim=8)
+    agent = SpectralSkillDiscovery(cfg, obs_dim=3, act_dim=1, act_low=[-1], act_high=[1], device="cpu")
+    zt = torch.as_tensor(z)
+    assert torch.equal(agent.skill_weights(zt), zt)
+
+
 def test_agent_update_and_duals():
     torch.manual_seed(0)
     cfg = SSDConfig(dim_skill=3, hidden_dim=32, batch_size=64, n_dual=1, n_readout_trajs=8, n_shuffles=50)
@@ -103,3 +117,19 @@ def test_agent_update_and_duals():
     assert agent.c == cfg.c0 * (1 + cfg.kappa)
     spec = agent.spectrum(buf)
     assert 0 <= spec.k_star <= 3
+
+
+def test_cube_discrete_skills():
+    """Cube skills: the 2^K unit-length corners of {-1, 1}^K, all distinct, spread evenly for evaluation."""
+    import numpy as np
+    from train import sample_skills
+
+    z = sample_skills(None, 16, 4, unit=False, discrete=True, even=True, cube=True)
+    assert len({tuple(r) for r in z.tolist()}) == 16
+    np.testing.assert_allclose(np.abs(z), 0.5)
+    np.testing.assert_allclose(z.mean(axis=0), 0.0, atol=1e-7)  # isotropic: E[z] = 0, E[z z^T] = I / K
+    np.testing.assert_allclose(z.T @ z / 16, np.eye(4) / 4, atol=1e-7)
+    cfg = SSDConfig(dim_skill=4, discrete=True, cube_skills=True, hidden_dim=8)
+    agent = SpectralSkillDiscovery(cfg, obs_dim=3, act_dim=1, act_low=[-1], act_high=[1], device="cpu")
+    zt = torch.as_tensor(z)
+    assert torch.equal(agent.skill_weights(zt), zt)

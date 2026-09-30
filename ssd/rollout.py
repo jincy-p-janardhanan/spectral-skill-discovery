@@ -66,3 +66,17 @@ def dimension_sweep(envs, policy, encoder, dim_skill: int, horizon: int, device,
         dphi.append((phi_k - phi_k[:, :1]).cpu().numpy())
         xy.append(traj["xy"])
     return {"xy": np.stack(xy), "dphi": np.stack(dphi), "alpha": alpha}
+
+
+def rollout_chunked(envs, policy, z: np.ndarray, horizon: int, device, **kwargs) -> dict[str, np.ndarray]:
+    """rollout() for len(z) episodes on a smaller pool of envs. Adds "success" for envs that track it."""
+    parts, success = [], []
+    for start in range(0, len(z), len(envs)):
+        chunk = z[start:start + len(envs)]
+        parts.append(rollout(envs[:len(chunk)], policy, chunk, horizon, device, **kwargs))
+        if hasattr(envs[0], "success"):
+            success += [env.success.copy() for env in envs[:len(chunk)]]
+    out = {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
+    if success:
+        out["success"] = np.array(success)
+    return out

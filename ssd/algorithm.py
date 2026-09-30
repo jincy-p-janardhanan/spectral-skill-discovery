@@ -15,6 +15,8 @@ from ssd.sac import SAC
 class SSDConfig:
     dim_skill: int = 8                 # K
     discrete: bool = False             # one-hot skills with METRA's centred mask
+    signed_skills: bool = False        # discrete skills z = +-e_k
+    cube_skills: bool = False          # discrete skills z in {-1, 1}^K / sqrt(K)
     hidden_dim: int = 1024
     n_layers: int = 2
     batch_size: int = 256
@@ -95,9 +97,8 @@ class SpectralSkillDiscovery:
         return phi.chunk(2, dim=0)
 
     def skill_weights(self, z: torch.Tensor) -> torch.Tensor:
-        """The vector phi-differences are projected on: z itself, or for discrete skills METRA's centred
-        one-hot mask (z - mean(z)) * K / (K - 1), so each skill pushes phi along its own axis and away from the rest."""
-        if not self.cfg.discrete:
+        """Vector the phi differences are projected on: z, or (z - mean(z)) * K / (K - 1) for one-hot skills."""
+        if not self.cfg.discrete or self.cfg.signed_skills or self.cfg.cube_skills:
             return z
         k = z.shape[-1]
         return (z - z.mean(dim=-1, keepdim=True)) * k / max(k - 1, 1)
