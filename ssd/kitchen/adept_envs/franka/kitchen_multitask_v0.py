@@ -20,6 +20,8 @@ import os
 
 
 import mujoco
+
+WELD_TORQUESCALE = 24.0
 import numpy as np
 import quaternion
 from dm_control.mujoco import engine
@@ -362,8 +364,9 @@ class KitchenV0(robot_env.RobotEnv):
             for i in range(sim.model.eq_data.shape[0]):
                 if sim.model.eq_type[i] == mujoco.mjtEq.mjEQ_WELD:
                     # weld data since MuJoCo 2.2: anchor, relpos, relquat, torquescale.
-                    sim.model.eq_data[i, 0:10] = np.array(
-                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]
+                    # torquescale 24 matches the MuJoCo 2.1 env METRA used.
+                    sim.model.eq_data[i, 0:11] = np.array(
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, WELD_TORQUESCALE]
                     )
         sim.forward()
 
