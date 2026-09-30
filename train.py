@@ -70,6 +70,17 @@ class Logger:
         for k, v in row.items():
             self.tb.add_scalar(k, v, step)
         path = self.dir / f"{name}.csv"
+        if name in self._files and not set(row) <= set(self._files[name][1].fieldnames):
+            # new columns: rewrite the file with the wider header
+            f, writer = self._files.pop(name)
+            f.close()
+            with path.open(newline="") as old:
+                rows = list(csv.DictReader(old))
+            fields = list(writer.fieldnames) + [k for k in row if k not in writer.fieldnames]
+            f = path.open("w", newline="")
+            self._files[name] = (f, csv.DictWriter(f, fieldnames=fields))
+            self._files[name][1].writeheader()
+            self._files[name][1].writerows(rows)
         if name not in self._files:
             f = path.open("w", newline="")
             self._files[name] = (f, csv.DictWriter(f, fieldnames=list(row)))
