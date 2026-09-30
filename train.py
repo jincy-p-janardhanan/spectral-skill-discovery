@@ -25,7 +25,7 @@ from ssd.buffer import TrajectoryBuffer
 from ssd.envs import ALL_ENVS, encoder_input_idx, make_env
 from ssd.plotting import plot_dimension_sweeps, plot_spectrum, plot_trajectories
 from ssd.metrics import body_coverage, coverage
-from ssd.rollout import SWEEP_ALPHAS, dimension_sweep, rollout, rollout_chunked
+from ssd.rollout import SWEEP_ALPHAS, dimension_sweep, rollout_chunked
 
 
 def parse_args():
@@ -52,8 +52,12 @@ def parse_args():
     p.add_argument("--n_eval", type=int, default=1000, help="n_eval: spectrum readout / eval period (iterations)")
     p.add_argument("--n_save", type=int, default=10_000, help="checkpoint period (iterations)")
     p.add_argument("--n_eval_rollouts", type=int, default=48, help="deterministic rollouts for plots / coverage")
+    p.add_argument("--n_train_envs", type=int, default=None,
+                   help="training env pool, reused in chunks (default: one env per rollout)")
     p.add_argument("--n_eval_envs", type=int, default=None,
                    help="evaluation env pool, reused in chunks (default: one env per evaluation rollout)")
+    p.add_argument("--share_envs", type=int, default=0,
+                   help="1: evaluate on the training envs (image envs hold one rendering context, and GPU memory, each)")
     p.add_argument("--eval_plot_axis", type=float, default=None, help="half-width of the trajectory plot")
     p.add_argument("--resume", type=int, default=0,
                    help="1: deterministic run directory <env>_K<K>_s<seed>; if it holds resume.pt, continue from it")
@@ -163,10 +167,10 @@ def main():
 
     seed_offset = 100_003 * start_it  # fresh env seeds after a resume
     train_envs = [make_env(args.env, seed=args.seed * 10_000 + i + seed_offset, normalize=bool(args.normalize_obs))
-                  for i in range(args.rollouts_per_iter)]
-    eval_envs = [make_env(args.env, seed=args.seed * 10_000 + 5_000 + i + seed_offset,
-                          normalize=bool(args.normalize_obs))
-                 for i in range(args.n_eval_envs or args.n_eval_rollouts)]
+                  for i in range(args.n_train_envs or args.rollouts_per_iter)]
+    eval_envs = train_envs if args.share_envs else [
+        make_env(args.env, seed=args.seed * 10_000 + 5_000 + i + seed_offset, normalize=bool(args.normalize_obs))
+        for i in range(args.n_eval_envs or args.n_eval_rollouts)]
     obs_dim = train_envs[0].observation_space.shape[0]
     space = train_envs[0].action_space
     k = cfg.dim_skill
@@ -201,7 +205,7 @@ def main():
         # rollouts
         z = sample_skills(rng, args.rollouts_per_iter, k, bool(args.unit_skills), cfg.discrete,
                           signed=cfg.signed_skills, cube=cfg.cube_skills)
-        traj = rollout(train_envs, agent.policy, z, args.horizon, device)
+        traj = rollout_chunked(train_envs, agent.policy, z, args.horizon, device)
         buffer.add(traj["obs"], traj["act"], traj["done"], traj["z"])
         env_steps += args.rollouts_per_iter * args.horizon * action_repeat
 

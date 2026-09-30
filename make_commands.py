@@ -26,9 +26,11 @@ ENVS = {
                     "--buffer_size 300000 --eval_plot_axis 15 --n_readout_trajs 128 --n_log 25",
     # METRA: pixels, --max_path_length 50, --dim_option 24 --discrete 1, --trans_optimization_epochs 100,
     # --sac_max_buffer_size 100000, --sac_lr_a -1 (fixed temperature), --n_epochs_per_log 25.
-    # SSD: 32 cube skills (K = 5) in place of 24 one-hot skills
+    # SSD: 32 cube skills (K = 5) in place of 24 one-hot skills. One pool of 4 envs serves training and evaluation:
+    # the Kitchen model asks for a 2560x1920, 8x multisampled offscreen buffer (about 0.5 GB of GPU memory per
+    # env), so 16 envs per run, 4 runs per GPU, ran out of memory on a 48 GB GPU.
     "kitchen": "--env kitchen --horizon 50 --dim_skill 5 --discrete 1 --cube_skills 1 --updates_per_iter 100 "
-               "--buffer_size 100000 --lr_alpha 0 --n_readout_trajs 128 --n_log 25 --n_eval_envs 8",
+               "--buffer_size 100000 --lr_alpha 0 --n_readout_trajs 128 --n_log 25 --n_train_envs 4 --share_envs 1",
 }
 
 # training length and evaluation period of METRA's benchmark, in METRA epochs = SSD iterations
