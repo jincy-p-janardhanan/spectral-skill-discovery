@@ -14,8 +14,9 @@ ENVS = {
     "ant": "--env ant --horizon 200 --dim_skill 2 --discrete 0 --unit_skills 1 --updates_per_iter 50 "
            "--buffer_size 1000000 --eval_plot_axis 50",
     # METRA: --dim_option 16 --discrete 1 --trans_optimization_epochs 50 --sac_max_buffer_size 1000000
-    "half_cheetah": "--env half_cheetah --horizon 200 --dim_skill 16 --discrete 1 --updates_per_iter 50 "
-                    "--buffer_size 1000000",
+    # SSD: 16 cube skills (K = 4) in place of 16 one-hot skills
+    "half_cheetah": "--env half_cheetah --horizon 200 --dim_skill 4 --discrete 1 --cube_skills 1 "
+                    "--updates_per_iter 50 --buffer_size 1000000",
     # METRA: pixels, --frame_stack 3, action repeat 2, --dim_option 4, --trans_optimization_epochs 200,
     # --sac_max_buffer_size 300000, --n_epochs_per_log 25
     "dmc_quadruped": "--env dmc_quadruped --horizon 200 --dim_skill 4 --discrete 0 --unit_skills 1 --updates_per_iter 200 "
@@ -24,8 +25,9 @@ ENVS = {
     "dmc_humanoid": "--env dmc_humanoid --horizon 200 --dim_skill 2 --discrete 0 --unit_skills 1 --updates_per_iter 200 "
                     "--buffer_size 300000 --eval_plot_axis 15 --n_readout_trajs 128 --n_log 25",
     # METRA: pixels, --max_path_length 50, --dim_option 24 --discrete 1, --trans_optimization_epochs 100,
-    # --sac_max_buffer_size 100000, --sac_lr_a -1 (fixed temperature), --n_epochs_per_log 25
-    "kitchen": "--env kitchen --horizon 50 --dim_skill 24 --discrete 1 --updates_per_iter 100 "
+    # --sac_max_buffer_size 100000, --sac_lr_a -1 (fixed temperature), --n_epochs_per_log 25.
+    # SSD: 32 cube skills (K = 5) in place of 24 one-hot skills
+    "kitchen": "--env kitchen --horizon 50 --dim_skill 5 --discrete 1 --cube_skills 1 --updates_per_iter 100 "
                "--buffer_size 100000 --lr_alpha 0 --n_readout_trajs 128 --n_log 25 --n_eval_envs 8",
 }
 
