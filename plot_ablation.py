@@ -36,6 +36,7 @@ def main():
     p.add_argument("--metra_dir", default=None, help="METRA's experiment group, drawn for reference")
     p.add_argument("--max_steps", type=float, default=None)
     p.add_argument("--title", default=None)
+    p.add_argument("--legend_outside", action="store_true", help="legend right of the axes (for crowded plots)")
     p.add_argument("--out", required=True)
     args = p.parse_args()
 
@@ -49,7 +50,7 @@ def main():
     if metra:
         curves.append(("METRA", metra, COLORS["METRA"], "--"))
 
-    fig, ax = plt.subplots(figsize=(7.2, 4.6))
+    fig, ax = plt.subplots(figsize=(10.4 if args.legend_outside else 7.2, 4.6))
     rows = []
     for label, runs, color, ls in curves:
         if args.max_steps:
@@ -65,7 +66,10 @@ def main():
     ax.set_xlabel("Environment steps (M)")
     ax.set_ylabel(metric_keys(args.env)[2])
     ax.set_title(args.title or ENV_TITLES.get(args.env, args.env))
-    ax.legend(frameon=False, fontsize=8.5, loc="upper left")
+    if args.legend_outside:
+        ax.legend(frameon=False, fontsize=8.5, loc="upper left", bbox_to_anchor=(1.07, 1))
+    else:
+        ax.legend(frameon=False, fontsize=8.5, loc="upper left")
     fig.tight_layout()
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.out, dpi=150)

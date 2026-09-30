@@ -87,6 +87,11 @@ CMDS=commands/commands.txt START=0 COUNT=8 sbatch --account=jincypjanardhanan ru
 The ports needed to match METRA are listed below.
 - **Discrete skills** (`--discrete 1`): one-hot z, and the reward uses METRA's centred mask
   (z − mean z)·K/(K−1). The SSD algorithm samples z ~ N(0, I_K); this mode exists only to match METRA's settings.
+  The mask needs correlated dimensions, which the decorrelation constraints forbid (HalfCheetah: 70 x-cells vs
+  METRA's 161 at 8M steps). The benchmark runs therefore use **cube skills** (`--discrete 1 --cube_skills 1`): the 2^K
+  corners z ∈ {−1, 1}^K/√K, with the reward on z itself. They are unit-length and isotropic, and every skill
+  trains every dimension; K = 4 gives METRA's 16 skills and reaches 169. `--signed_skills 1` gives the 2K
+  skills ±e_k instead (132).
 - **DMC** (`ssd/dmc.py`, `ssd/custom_dmc_tasks/`): METRA's coloured-floor tasks on current `dm_control`.
   The only change in METRA's task code is `np.in1d` → `np.isin` for NumPy 2.
 - **Kitchen** (`ssd/kitchen/`): the D4RL / RAPS end-effector kitchen and LEXA wrapper that METRA uses,
