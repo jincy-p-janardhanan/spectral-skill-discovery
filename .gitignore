@@ -11,6 +11,15 @@ logs/
 commands/
 *.pt
 figures/
+report/
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.out
+*.synctex.gz
+*.toc
 
 .vscode/
 .idea/

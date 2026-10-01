@@ -73,11 +73,14 @@ SSD iteration.
 
 | Env | Obs | Skills | T | Updates / iter | Buffer | Iterations | Eval every |
 |---|---|---|---|---|---|---|---|
-| `ant` | state (29-D) | 2 continuous | 200 | 50 | 1M | 10,001 | 500 |
-| `half_cheetah` | state (18-D) | 16 discrete | 200 | 50 | 1M | 10,001 | 500 |
-| `dmc_quadruped` | 64x64 RGB x3, action repeat 2 | 4 continuous | 200 | 200 | 300k | 2,001 | 100 |
-| `dmc_humanoid` | 64x64 RGB x3, action repeat 2 | 2 continuous | 200 | 200 | 300k | 3,201 | 160 |
-| `kitchen` | 64x64 RGB x3 | 24 discrete, fixed α | 50 | 100 | 100k | 2,501 | 125 |
+| `ant` | state (29-D) | 2-D unit-length | 200 | 50 | 1M | 10,001 | 500 |
+| `half_cheetah` | state (18-D) | 16 cube (K = 4) | 200 | 50 | 1M | 10,001 | 500 |
+| `dmc_quadruped` | 64x64 RGB x3, action repeat 2 | 4-D unit-length | 200 | 200 | 300k | 2,001 | 100 |
+| `dmc_humanoid` | 64x64 RGB x3, action repeat 2 | 2-D unit-length | 200 | 200 | 300k | 3,201 | 160 |
+| `kitchen` | 64x64 RGB x3 | 32 cube (K = 5), fixed α | 50 | 100 | 100k | 2,501 | 125 |
+
+METRA uses the same settings with 16 (HalfCheetah) and 24 (Kitchen) one-hot skills. The skill choices, the fixes
+behind them and the results are written up in [report/ssd_metra_report.pdf](report/ssd_metra_report.pdf).
 
 ```bash
 uv run make_commands.py --out commands/commands.txt            # 40 commands, one per (env, seed)
