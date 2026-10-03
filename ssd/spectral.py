@@ -28,9 +28,11 @@ def decorrelation(
     return (cov / denom)[rows, cols]
 
 
-def temporal_hinge(phi_s: torch.Tensor, phi_next: torch.Tensor) -> torch.Tensor:
-    """h = mean_(s,s') max(0, ||phi(s) - phi(s')||^2 - 1)."""
-    return torch.clamp((phi_s - phi_next).square().sum(dim=-1) - 1.0, min=0.0).mean()
+def temporal_hinge(phi_s: torch.Tensor, phi_next: torch.Tensor, per_dim: bool = False) -> torch.Tensor:
+    """h = mean max(0, ||phi(s') - phi(s)||^2 - 1). per_dim averages over dimensions instead, as METRA's code."""
+    sq = (phi_s - phi_next).square()
+    sq = sq.mean(dim=-1) if per_dim else sq.sum(dim=-1)
+    return torch.clamp(sq - 1.0, min=0.0).mean()
 
 
 def skill_objective(phi_s: torch.Tensor, phi_next: torch.Tensor, z: torch.Tensor) -> torch.Tensor:

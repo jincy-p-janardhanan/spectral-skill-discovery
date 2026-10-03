@@ -48,6 +48,8 @@ def test_temporal_hinge():
     a = torch.zeros(2, 2)
     b = torch.tensor([[0.5, 0.0], [2.0, 0.0]])  # squared distances 0.25 and 4
     assert spectral.temporal_hinge(a, b).item() == 1.5  # mean(0, 3)
+    # METRA's convention averages over the K = 2 dimensions: mean(max(0, 0.125 - 1), max(0, 2 - 1)) = 0.5
+    assert spectral.temporal_hinge(a, b, per_dim=True).item() == 0.5
 
 
 def test_barrier_gradient_matches_quadratic_penalty():
@@ -117,6 +119,20 @@ def test_agent_update_and_duals():
     assert agent.c == cfg.c0 * (1 + cfg.kappa)
     spec = agent.spectrum(buf)
     assert 0 <= spec.k_star <= 3
+
+
+def test_decorrelation_warmup():
+    """Before decor_warmup updates, the duals beta and the barrier c stay at their initial values."""
+    torch.manual_seed(0)
+    cfg = SSDConfig(dim_skill=3, hidden_dim=32, batch_size=64, n_dual=1, decor_warmup=5)
+    agent = SpectralSkillDiscovery(cfg, obs_dim=5, act_dim=2, act_low=[-1, -1], act_high=[1, 1], device="cpu")
+    buf = TrajectoryBuffer(capacity=200, horizon=10, obs_dim=5, act_dim=2, dim_skill=3, device="cpu")
+    buf.add(torch.randn(20, 11, 5), torch.rand(20, 10, 2) * 2 - 1, torch.zeros(20, 10), torch.randn(20, 3))
+    for _ in range(5):
+        agent.update(buf)
+    assert agent.beta.abs().sum() == 0 and agent.c == cfg.c0
+    agent.update(buf)
+    assert agent.beta.abs().sum() > 0 and agent.c > cfg.c0
 
 
 def test_cube_discrete_skills():

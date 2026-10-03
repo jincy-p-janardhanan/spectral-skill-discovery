@@ -35,6 +35,8 @@ class SSDConfig:
     n_dual: int = 10                   # dual update period, in updates
     eps: float = 1e-6
     sigma_k_grad: bool = True          # gradient through sigma_k in C_kj
+    temporal_per_dim: bool = False     # mean_k (dphi_k)^2 <= 1 as in METRA's code
+    decor_warmup: int = 0              # updates before decorrelation starts
     # EMA target encoder
     encoder_tau: float = 5e-3
     reward_use_target: bool = False
@@ -89,7 +91,7 @@ class SpectralSkillDiscovery:
 
     def _constraints(self, phi_s: torch.Tensor, phi_next: torch.Tensor):
         c = spectral.decorrelation(phi_s, self.rows, self.cols, self.cfg.eps, self.cfg.sigma_k_grad)
-        h = spectral.temporal_hinge(phi_s, phi_next)
+        h = spectral.temporal_hinge(phi_s, phi_next, self.cfg.temporal_per_dim)
         return c, h
 
     def _encode_pair(self, encoder, batch):
@@ -122,7 +124,9 @@ class SpectralSkillDiscovery:
             c2, h2 = self._constraints(*self._encode_pair(self.encoder, b2))
         j_hat = spectral.skill_objective(phi1_s, phi1_next, self.skill_weights(b1["z"])).mean()
 
-        lagrangian = spectral.lagrangian(j_hat, c1, h1, c2, h2, self.beta, self.nu, self.c)
+        # During the warm-up phi learns the skills under the temporal constraint only; beta and c stay put.
+        decor_on = self.n_updates >= cfg.decor_warmup
+        lagrangian = spectral.lagrangian(j_hat, c1 if decor_on else c1 * 0, h1, c2, h2, self.beta, self.nu, self.c)
         self.encoder_opt.zero_grad(set_to_none=True)
         (-lagrangian).backward()  # gradient ascent on L
         self.encoder_opt.step()
@@ -131,11 +135,13 @@ class SpectralSkillDiscovery:
         self.n_updates += 1
         c1, h1 = c1.detach(), h1.detach()
         if self.n_updates % cfg.n_dual == 0:
-            self.beta += cfg.eta_beta * 0.5 * (c1 + c2)
+            if decor_on:
+                self.beta += cfg.eta_beta * 0.5 * (c1 + c2)
             self.nu = torch.clamp(self.nu + cfg.eta_nu * 0.5 * (h1 + h2), min=0.0)
 
         # barrier and EMA target
-        self.c = min(cfg.c_max, self.c * (1 + cfg.kappa))
+        if decor_on:
+            self.c = min(cfg.c_max, self.c * (1 + cfg.kappa))
         with torch.no_grad():
             for tp, p in zip(self.target_encoder.parameters(), self.encoder.parameters()):
                 tp.lerp_(p, cfg.encoder_tau)
