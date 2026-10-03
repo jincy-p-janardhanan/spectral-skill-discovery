@@ -26,6 +26,7 @@ report/
 *.swp
 .DS_Store
 
+plot_diagnostics.py
 plot_results.py
 visualize.py
 ssd/kitchen/adept_envs/.pylintrc
