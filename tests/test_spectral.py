@@ -135,6 +135,36 @@ def test_decorrelation_warmup():
     assert agent.beta.abs().sum() > 0 and agent.c > cfg.c0
 
 
+def test_decorrelation_ramp():
+    """After the warm-up the duals start moving at once, but the decorrelation weight only reaches 1 after the ramp."""
+    torch.manual_seed(0)
+    cfg = SSDConfig(dim_skill=3, hidden_dim=32, batch_size=64, n_dual=1, decor_warmup=2, decor_ramp=4)
+    agent = SpectralSkillDiscovery(cfg, obs_dim=5, act_dim=2, act_low=[-1, -1], act_high=[1, 1], device="cpu")
+    buf = TrajectoryBuffer(capacity=200, horizon=10, obs_dim=5, act_dim=2, dim_skill=3, device="cpu")
+    buf.add(torch.randn(20, 11, 5), torch.rand(20, 10, 2) * 2 - 1, torch.zeros(20, 10), torch.randn(20, 3))
+    for _ in range(2):
+        agent.update(buf)
+    assert agent.beta.abs().sum() == 0 and agent.c == cfg.c0
+    agent.update(buf)  # delta = 1/4
+    assert agent.beta.abs().sum() > 0 and agent.c > cfg.c0
+
+
+def test_encoder_split_and_head_only_decorrelation():
+    """phi = head(features); with decor_head_only the update still trains the whole encoder (through J and h)."""
+    torch.manual_seed(0)
+    cfg = SSDConfig(dim_skill=3, hidden_dim=32, batch_size=64, n_dual=1, decor_head_only=True)
+    agent = SpectralSkillDiscovery(cfg, obs_dim=5, act_dim=2, act_low=[-1, -1], act_high=[1, 1], device="cpu")
+    obs = torch.randn(7, 5)
+    torch.testing.assert_close(agent.encoder(obs), agent.encoder.head(agent.encoder.features(obs)))
+    buf = TrajectoryBuffer(capacity=200, horizon=10, obs_dim=5, act_dim=2, dim_skill=3, device="cpu")
+    buf.add(torch.randn(20, 11, 5), torch.rand(20, 10, 2) * 2 - 1, torch.zeros(20, 10), torch.randn(20, 3))
+    before = [p.clone() for p in agent.encoder.parameters()]
+    m = agent.update(buf)
+    assert all(torch.isfinite(v) for v in m.values())
+    assert all(not torch.equal(a, b) for a, b in zip(before, agent.encoder.parameters()))
+    assert agent.beta.abs().sum() > 0
+
+
 def test_cube_discrete_skills():
     """Cube skills: the 2^K unit-length corners of {-1, 1}^K, all distinct, spread evenly for evaluation."""
     import numpy as np

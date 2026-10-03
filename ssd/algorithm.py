@@ -37,6 +37,8 @@ class SSDConfig:
     sigma_k_grad: bool = True          # gradient through sigma_k in C_kj
     temporal_per_dim: bool = False     # mean_k (dphi_k)^2 <= 1 as in METRA's code
     decor_warmup: int = 0              # updates before decorrelation starts
+    decor_ramp: int = 0                # updates over which the decorrelation weight ramps to 1
+    decor_head_only: bool = False      # decorrelation gradients only reach the last layer of phi
     # EMA target encoder
     encoder_tau: float = 5e-3
     reward_use_target: bool = False
@@ -118,15 +120,22 @@ class SpectralSkillDiscovery:
         # encoder update on two independent batches
         b1 = buffer.sample_transitions(cfg.batch_size)
         b2 = buffer.sample_transitions(cfg.batch_size)
-        phi1_s, phi1_next = self._encode_pair(self.encoder, b1)
+        feat1 = self.encoder.features(torch.cat([b1["obs"], b1["next_obs"]], dim=0))
+        phi1_s, phi1_next = self.encoder.head(feat1).chunk(2, dim=0)
         c1, h1 = self._constraints(phi1_s, phi1_next)
+        if cfg.decor_head_only:
+            c1 = spectral.decorrelation(self.encoder.head(feat1.detach()).chunk(2, dim=0)[0], self.rows, self.cols,
+                                        cfg.eps, cfg.sigma_k_grad)
         with torch.no_grad():
             c2, h2 = self._constraints(*self._encode_pair(self.encoder, b2))
         j_hat = spectral.skill_objective(phi1_s, phi1_next, self.skill_weights(b1["z"])).mean()
 
-        # During the warm-up phi learns the skills under the temporal constraint only; beta and c stay put.
-        decor_on = self.n_updates >= cfg.decor_warmup
-        lagrangian = spectral.lagrangian(j_hat, c1 if decor_on else c1 * 0, h1, c2, h2, self.beta, self.nu, self.c)
+        # decorrelation weight: 0 during the warm-up, then a linear ramp to 1
+        delta = float(self.n_updates >= cfg.decor_warmup)
+        if cfg.decor_ramp > 0:
+            delta = min(1.0, max(0.0, (self.n_updates - cfg.decor_warmup + 1) / cfg.decor_ramp))
+        decor_on = delta > 0
+        lagrangian = spectral.lagrangian(j_hat, c1 * delta, h1, c2, h2, self.beta, self.nu, self.c)
         self.encoder_opt.zero_grad(set_to_none=True)
         (-lagrangian).backward()  # gradient ascent on L
         self.encoder_opt.step()
@@ -136,7 +145,7 @@ class SpectralSkillDiscovery:
         c1, h1 = c1.detach(), h1.detach()
         if self.n_updates % cfg.n_dual == 0:
             if decor_on:
-                self.beta += cfg.eta_beta * 0.5 * (c1 + c2)
+                self.beta += cfg.eta_beta * delta * 0.5 * (c1 + c2)
             self.nu = torch.clamp(self.nu + cfg.eta_nu * 0.5 * (h1 + h2), min=0.0)
 
         # barrier and EMA target

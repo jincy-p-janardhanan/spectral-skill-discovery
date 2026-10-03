@@ -64,10 +64,17 @@ class Encoder(nn.Module):
         self.obs_enc, feat = obs_encoder(len(idx), pixel_shape)
         self.net = mlp(feat, dim_skill, hidden_dim, n_layers)
 
-    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+    def features(self, obs: torch.Tensor) -> torch.Tensor:
+        """Everything below the final linear layer."""
         if isinstance(self.obs_enc, nn.Identity):
             obs = obs.index_select(-1, self.input_idx)
-        return self.net(self.obs_enc(obs))
+        return self.net[:-1](self.obs_enc(obs))
+
+    def head(self, features: torch.Tensor) -> torch.Tensor:
+        return self.net[-1](features)
+
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        return self.head(self.features(obs))
 
 
 class TanhGaussianPolicy(nn.Module):
