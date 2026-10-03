@@ -39,6 +39,8 @@ class SSDConfig:
     decor_warmup: int = 0              # updates before decorrelation starts
     decor_ramp: int = 0                # updates over which the decorrelation weight ramps to 1
     decor_head_only: bool = False      # decorrelation gradients only reach the last layer of phi
+    decor_scale: float = 0.0           # > 0: weight C_kj by s_k s_j / (s_k s_j + decor_scale)
+    encoder_per_dim: bool = False      # separate encoder network per dimension
     # EMA target encoder
     encoder_tau: float = 5e-3
     reward_use_target: bool = False
@@ -62,7 +64,8 @@ class SpectralSkillDiscovery:
         self.device = device
         k = cfg.dim_skill
 
-        self.encoder = Encoder(obs_dim, k, cfg.hidden_dim, cfg.n_layers, encoder_input_idx, pixel_shape).to(device)
+        self.encoder = Encoder(obs_dim, k, cfg.hidden_dim, cfg.n_layers, encoder_input_idx, pixel_shape,
+                               per_dim=cfg.encoder_per_dim).to(device)
         self.target_encoder = copy.deepcopy(self.encoder).requires_grad_(False)
         self.encoder_opt = torch.optim.Adam(self.encoder.parameters(), lr=cfg.lr_theta)
 
@@ -91,10 +94,19 @@ class SpectralSkillDiscovery:
     def act(self, obs: torch.Tensor, z: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
         return self.policy(obs, z, deterministic=deterministic)[0]
 
+    def _decor_weight(self, phi_s: torch.Tensor) -> torch.Tensor | float:
+        """Per-pair weight s_k s_j / (s_k s_j + decor_scale) on C_kj, or 1 if decor_scale is 0."""
+        if self.cfg.decor_scale <= 0:
+            return 1.0
+        s = phi_s.detach().std(dim=0, correction=0)
+        ss = s[self.rows] * s[self.cols]
+        return ss / (ss + self.cfg.decor_scale)
+
     def _constraints(self, phi_s: torch.Tensor, phi_next: torch.Tensor):
+        """Returns (weighted C, h, unweighted C)."""
         c = spectral.decorrelation(phi_s, self.rows, self.cols, self.cfg.eps, self.cfg.sigma_k_grad)
         h = spectral.temporal_hinge(phi_s, phi_next, self.cfg.temporal_per_dim)
-        return c, h
+        return c * self._decor_weight(phi_s), h, c
 
     def _encode_pair(self, encoder, batch):
         phi = encoder(torch.cat([batch["obs"], batch["next_obs"]], dim=0))
@@ -120,14 +132,18 @@ class SpectralSkillDiscovery:
         # encoder update on two independent batches
         b1 = buffer.sample_transitions(cfg.batch_size)
         b2 = buffer.sample_transitions(cfg.batch_size)
-        feat1 = self.encoder.features(torch.cat([b1["obs"], b1["next_obs"]], dim=0))
-        phi1_s, phi1_next = self.encoder.head(feat1).chunk(2, dim=0)
-        c1, h1 = self._constraints(phi1_s, phi1_next)
+        pair1 = torch.cat([b1["obs"], b1["next_obs"]], dim=0)
+        if cfg.decor_head_only:
+            feat1 = self.encoder.features(pair1)
+            phi1_s, phi1_next = self.encoder.head(feat1).chunk(2, dim=0)
+        else:
+            phi1_s, phi1_next = self.encoder(pair1).chunk(2, dim=0)
+        c1, h1, c1_raw = self._constraints(phi1_s, phi1_next)
         if cfg.decor_head_only:
             c1 = spectral.decorrelation(self.encoder.head(feat1.detach()).chunk(2, dim=0)[0], self.rows, self.cols,
                                         cfg.eps, cfg.sigma_k_grad)
         with torch.no_grad():
-            c2, h2 = self._constraints(*self._encode_pair(self.encoder, b2))
+            c2, h2, c2_raw = self._constraints(*self._encode_pair(self.encoder, b2))
         j_hat = spectral.skill_objective(phi1_s, phi1_next, self.skill_weights(b1["z"])).mean()
 
         # decorrelation weight: 0 during the warm-up, then a linear ramp to 1
@@ -155,7 +171,7 @@ class SpectralSkillDiscovery:
             for tp, p in zip(self.target_encoder.parameters(), self.encoder.parameters()):
                 tp.lerp_(p, cfg.encoder_tau)
 
-        corr = 0.5 * (c1 + c2)
+        corr = 0.5 * (c1_raw.detach() + c2_raw)
         metrics.update({
             "ssd/lagrangian": lagrangian.detach(),
             "ssd/J": j_hat.detach(),

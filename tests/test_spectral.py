@@ -165,6 +165,32 @@ def test_encoder_split_and_head_only_decorrelation():
     assert agent.beta.abs().sum() > 0
 
 
+def test_per_dimension_encoder_keeps_dimensions_apart():
+    """With one network per dimension, a loss on dimension 3 leaves the networks of dimensions 1 and 2 untouched."""
+    from ssd.networks import Encoder
+
+    torch.manual_seed(0)
+    enc = Encoder(obs_dim=5, dim_skill=3, hidden_dim=16, n_layers=2, per_dim=True)
+    out = enc(torch.randn(8, 5))
+    assert out.shape == (8, 3)
+    out[:, 2].sum().backward()
+    untouched = lambda net: all(p.grad is None or p.grad.abs().sum() == 0 for p in net.parameters())
+    assert untouched(enc.dims[0]) and untouched(enc.dims[1])
+    assert all(p.grad is not None and p.grad.abs().sum() > 0 for p in enc.dims[2].parameters() if p.dim() > 1)
+
+
+def test_scale_aware_decorrelation_weight():
+    """decor_scale weights each pair by s_k s_j / (s_k s_j + scale): ~0 for undeveloped dimensions, ~1 once spread."""
+    cfg = SSDConfig(dim_skill=3, hidden_dim=8, decor_scale=1.0)
+    agent = SpectralSkillDiscovery(cfg, obs_dim=5, act_dim=2, act_low=[-1, -1], act_high=[1, 1], device="cpu")
+    torch.manual_seed(0)
+    small, large = 0.01 * torch.randn(512, 3), 30 * torch.randn(512, 3)
+    assert agent._decor_weight(small).max() < 1e-3
+    assert agent._decor_weight(large).min() > 0.99
+    c_weighted, _, c_raw = agent._constraints(small, small + 0.001)
+    assert c_weighted.abs().max() < 1e-3 * c_raw.abs().max() + 1e-9
+
+
 def test_cube_discrete_skills():
     """Cube skills: the 2^K unit-length corners of {-1, 1}^K, all distinct, spread evenly for evaluation."""
     import numpy as np

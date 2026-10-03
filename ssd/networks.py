@@ -50,30 +50,42 @@ def obs_encoder(obs_dim: int, pixel_shape) -> tuple[nn.Module, int]:
 
 
 class Encoder(nn.Module):
-    """phi_theta: S -> R^K. Deterministic, as in METRA's inner-product parameterisation.
+    """phi_theta: S -> R^K.
 
-    `input_idx` restricts phi to a subset of a state observation (e.g. everything but the global position),
-    while callers keep passing full observations. `pixel_shape` puts METRA's CNN in front of the MLP.
+    input_idx restricts phi to part of the state observation. per_dim uses a separate network per dimension.
     """
 
     def __init__(self, obs_dim: int, dim_skill: int, hidden_dim: int, n_layers: int,
-                 input_idx: list[int] | None = None, pixel_shape=None):
+                 input_idx: list[int] | None = None, pixel_shape=None, per_dim: bool = False):
         super().__init__()
         idx = torch.arange(obs_dim) if input_idx is None else torch.as_tensor(input_idx, dtype=torch.long)
         self.register_buffer("input_idx", idx)
-        self.obs_enc, feat = obs_encoder(len(idx), pixel_shape)
-        self.net = mlp(feat, dim_skill, hidden_dim, n_layers)
+        self.is_pixel = pixel_shape is not None
+        self.per_dim = per_dim
+        if per_dim:
+            self.dims = nn.ModuleList()
+            for _ in range(dim_skill):
+                enc, feat = obs_encoder(len(idx), pixel_shape)
+                self.dims.append(nn.Sequential(enc, mlp(feat, 1, hidden_dim, n_layers)))
+        else:
+            self.obs_enc, feat = obs_encoder(len(idx), pixel_shape)
+            self.net = mlp(feat, dim_skill, hidden_dim, n_layers)
+
+    def _inputs(self, obs: torch.Tensor) -> torch.Tensor:
+        return obs if self.is_pixel else obs.index_select(-1, self.input_idx)
 
     def features(self, obs: torch.Tensor) -> torch.Tensor:
         """Everything below the final linear layer."""
-        if isinstance(self.obs_enc, nn.Identity):
-            obs = obs.index_select(-1, self.input_idx)
-        return self.net[:-1](self.obs_enc(obs))
+        assert not self.per_dim, "a per-dimension encoder has no shared trunk"
+        return self.net[:-1](self.obs_enc(self._inputs(obs)))
 
     def head(self, features: torch.Tensor) -> torch.Tensor:
         return self.net[-1](features)
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        if self.per_dim:
+            x = self._inputs(obs)
+            return torch.cat([net(x) for net in self.dims], dim=-1)
         return self.head(self.features(obs))
 
 
