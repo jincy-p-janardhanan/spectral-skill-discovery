@@ -73,13 +73,12 @@ def spectrum_readout(
     n_shuffles: int,
     quantile: float = 0.95,
     generator: torch.Generator | None = None,
+    min_ratio: float = 0.0,
 ) -> Spectrum:
-    """Spectrum readout with a permutation test.
+    """Per-dimension spread and return, and K* from a permutation test.
 
-    Args:
-        phi_traj: encoder outputs along N trajectories, shape [N, T+1, K].
-        z: the skill each trajectory was collected with, shape [N, K].
-        n_shuffles: number M of permutations of z across trajectories.
+    phi_traj: [N, T+1, K] encoder outputs along N trajectories, z: [N, K] their skills.
+    min_ratio additionally requires R_k >= min_ratio * max_j R_j.
     """
     n, _, k = phi_traj.shape
     sigma2 = phi_traj.reshape(-1, k).var(dim=0, correction=0)
@@ -91,6 +90,8 @@ def spectrum_readout(
     null = (delta.unsqueeze(0) * z[perms]).mean(dim=1)  # [M, K]
     floor = torch.quantile(null, quantile, dim=0)
 
-    passed = (returns > floor).int()
-    k_star = int(passed.cumprod(dim=0).sum().item())
+    passed = returns > floor
+    if min_ratio > 0:
+        passed &= returns >= min_ratio * returns.max()
+    k_star = int(passed.int().cumprod(dim=0).sum().item())
     return Spectrum(sigma2=sigma2, returns=returns, floor=floor, k_star=k_star)

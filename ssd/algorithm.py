@@ -55,6 +55,7 @@ class SSDConfig:
     n_readout_trajs: int = 256         # N
     n_shuffles: int = 1000             # M
     readout_quantile: float = 0.95
+    readout_min_ratio: float = 0.0     # K* also needs R_k >= this * max R (effect size); 0 = off
 
 
 class SpectralSkillDiscovery:
@@ -194,7 +195,7 @@ class SpectralSkillDiscovery:
         flat = obs.reshape(n * t1, d)
         phi = torch.cat([enc(chunk) for chunk in flat.split(2048)]).reshape(n, t1, -1)
         return spectral.spectrum_readout(phi, self.skill_weights(z), cfg.n_shuffles, cfg.readout_quantile,
-                                         self.readout_gen)
+                                         self.readout_gen, cfg.readout_min_ratio)
 
     def state_dict(self):
         return {

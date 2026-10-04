@@ -79,6 +79,19 @@ def test_readout_recovers_leading_dimensions():
     assert spec.sigma2.shape == (k,)
 
 
+def test_readout_effect_size_condition():
+    """A dimension with a real but tiny effect passes the permutation test; min_ratio drops it from K*."""
+    torch.manual_seed(0)
+    n, t, k = 4096, 10, 3
+    z = torch.randn(n, k)
+    phi = 0.1 * torch.randn(n, t + 1, k)
+    phi[:, -1, 0] += 10 * z[:, 0]
+    phi[:, -1, 1] += 0.05 * z[:, 1]  # 0.5% of dimension 1's effect, yet clearly above chance with N = 4096
+    gen = lambda: torch.Generator().manual_seed(0)
+    assert spectral.spectrum_readout(phi, z, n_shuffles=300, generator=gen()).k_star == 2
+    assert spectral.spectrum_readout(phi, z, n_shuffles=300, generator=gen(), min_ratio=0.05).k_star == 1
+
+
 def test_discrete_skill_weights_match_metra_mask():
     """METRA's discrete reward uses (z - mean(z)) * K / (K - 1): +1 on the chosen skill, -1/(K-1) elsewhere."""
     cfg = SSDConfig(dim_skill=4, discrete=True, hidden_dim=8)
