@@ -79,7 +79,10 @@ SSD iteration.
 | `dmc_humanoid` | 64x64 RGB x3, action repeat 2 | 2-D unit-length | 200 | 200 | 300k | 3,201 | 160 |
 | `kitchen` | 64x64 RGB x3 | 32 cube (K = 5), fixed α | 50 | 100 | 100k | 2,501 | 125 |
 
-METRA uses the same settings with 16 (HalfCheetah) and 24 (Kitchen) one-hot skills. The skill choices, the fixes
+METRA uses the same settings with 16 (HalfCheetah) and 24 (Kitchen) one-hot skills. The pixel environments also
+use METRA's per-dimension temporal bound (`--temporal_per_dim 1`), one encoder network per dimension
+(`--encoder_per_dim 1`) and scale-aware decorrelation (`--decor_scale 10`); without the last two, decorrelation
+collapses dimension 1 through the shared encoder and learning stalls on pixels. The skill choices, the fixes
 behind them and the results are written up in [report/ssd_metra_report.pdf](report/ssd_metra_report.pdf).
 
 ```bash

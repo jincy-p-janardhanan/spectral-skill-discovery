@@ -18,7 +18,7 @@ ENVS = {
     "half_cheetah": "--env half_cheetah --horizon 200 --dim_skill 4 --discrete 1 --cube_skills 1 "
                     "--updates_per_iter 50 --buffer_size 1000000",
     # METRA: pixels, --frame_stack 3, action repeat 2, --dim_option 4, --trans_optimization_epochs 200,
-    # --sac_max_buffer_size 300000, --n_epochs_per_log 25. SSD: METRA's per-dimension temporal bound
+    # --sac_max_buffer_size 300000, --n_epochs_per_log 25
     "dmc_quadruped": "--env dmc_quadruped --horizon 200 --dim_skill 4 --discrete 0 --unit_skills 1 "
                      "--temporal_per_dim 1 --updates_per_iter 200 --buffer_size 300000 --eval_plot_axis 15 "
                      "--n_readout_trajs 128 --n_log 25",
@@ -32,6 +32,11 @@ ENVS = {
                "--updates_per_iter 100 --buffer_size 100000 --lr_alpha 0 --n_readout_trajs 128 --n_log 25 "
                "--n_train_envs 4 --share_envs 1",
 }
+
+# pixel envs: one encoder per dimension and scale-aware decorrelation
+PIXEL_DECOR = "--encoder_per_dim 1 --decor_scale 10"
+for _env in ("dmc_quadruped", "dmc_humanoid", "kitchen"):
+    ENVS[_env] += " " + PIXEL_DECOR
 
 # training length and evaluation period of METRA's benchmark, in METRA epochs = SSD iterations
 N_ITERS = {"ant": 10001, "half_cheetah": 10001, "dmc_quadruped": 2001, "dmc_humanoid": 3201, "kitchen": 2501}
