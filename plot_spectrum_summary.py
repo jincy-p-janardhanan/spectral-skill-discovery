@@ -3,9 +3,7 @@
     uv run plot_spectrum_summary.py --groups "ant=exp/PaperV2/ant_*" "half_cheetah=exp/PaperV2/half_cheetah_*" \
         --out figures/paper_v2/spectrum
 
-Writes <out>_final.png (per dimension at the last evaluation: spread sigma2_k on a log scale and return R_k
-against the 95% permutation floor, one dot per seed) and <out>_training.png (each dimension's share of the total
-spread, median over seeds, against environment steps).
+Writes <out>_final.png and <out>_training.png. K* is recomputed from the logged returns with --min_ratio.
 """
 
 import argparse
@@ -24,7 +22,13 @@ DIM_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", 
 FLOOR = "#8c8b86"
 
 
-def load(pattern):
+def k_star(ret: np.ndarray, floor: np.ndarray, min_ratio: float) -> np.ndarray:
+    """Leading dimensions with R_k > floor_k and R_k >= min_ratio * max R, per evaluation row [E, K] -> [E]."""
+    passed = (ret > floor) & (ret >= min_ratio * ret.max(axis=1, keepdims=True))
+    return np.cumprod(passed, axis=1).sum(axis=1)
+
+
+def load(pattern, min_ratio: float = 0.05):
     """Per run: env_steps [E], K_star [E], sigma2 / R / floor [E, K] from eval.csv."""
     runs = []
     for d in sorted(glob.glob(pattern)):
@@ -34,8 +38,9 @@ def load(pattern):
         e = read_csv(path)
         k = sum(1 for key in e if key.startswith("spectrum/sigma2_"))
         stack = lambda name: np.stack([e[f"spectrum/{name}_{i + 1}"] for i in range(k)], axis=1)
-        runs.append({"steps": e["env_steps"], "k_star": e["spectrum/K_star"].astype(int),
-                     "sigma2": stack("sigma2"), "R": stack("R"), "floor": stack("floor")})
+        ret, floor = stack("R"), stack("floor")
+        runs.append({"steps": e["env_steps"], "k_star": k_star(ret, floor, min_ratio),
+                     "sigma2": stack("sigma2"), "R": ret, "floor": floor})
     return runs
 
 
@@ -124,11 +129,12 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--groups", nargs="+", required=True, help="ENV=GLOB over run directories")
     p.add_argument("--out", required=True, help="output prefix")
+    p.add_argument("--min_ratio", type=float, default=0.05, help="effect-size condition for K* (0 = off)")
     args = p.parse_args()
     groups = []
     for spec in args.groups:
         env, pattern = spec.split("=", 1)
-        runs = load(pattern)
+        runs = load(pattern, args.min_ratio)
         if runs:
             groups.append((env, runs))
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)

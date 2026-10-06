@@ -55,7 +55,7 @@ class SSDConfig:
     n_readout_trajs: int = 256         # N
     n_shuffles: int = 1000             # M
     readout_quantile: float = 0.95
-    readout_min_ratio: float = 0.0     # K* also needs R_k >= this * max R (effect size); 0 = off
+    readout_min_ratio: float = 0.05    # K* also needs R_k >= readout_min_ratio * max R
 
 
 class SpectralSkillDiscovery:

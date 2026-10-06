@@ -138,6 +138,9 @@ SSD jobs run under the personal account `jincypjanardhanan`.
   still reach only the later dimension k. `--sigma_k_grad 0` stop-gradients the whole denominator.
 - **States in Cₖⱼ.** The decorrelation statistics use s from each batch. ε is added to the
   denominator, and σ uses population std.
+- **Effect size in K⋆ .** A dimension also needs R_k ≥ 0.05 · max_j R_j
+  (`--readout_min_ratio`, 0 turns it off). The permutation test alone passes real but negligible effects once
+  N is large, so K⋆ grew with N and varied between repeated readouts (`readout_sweep.py`, figures/readout/).
 - **Readout trajectories.** These are N trajectories sampled from D. Separately, a
   deterministic evaluation rollout with fresh z gives METRA's coverage metric and the trajectory plot.
 - **Dual, barrier and encoder rates.** The defaults in `SSDConfig` (ν₀=30 as METRA's λ₀; ηβ=ην=1e-2,
