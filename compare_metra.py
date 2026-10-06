@@ -57,6 +57,7 @@ def method_name(args):
 
 COLORS = {"SSD": "#2a78d6", "METRA": "#eb6834", "LSD": "#1baf7a", "DIAYN": "#eda100", "DADS": "#e87ba4"}
 INK, INK2, GRID, SURFACE = "#0b0b0b", "#52514e", "#e5e4e0", "#fcfcfb"
+ACTION_REPEAT = {"dmc_quadruped": 2, "dmc_humanoid": 2}
 ENV_TITLES = {"ant": "Ant (states)", "half_cheetah": "HalfCheetah (states)", "dmc_quadruped": "Quadruped (pixels)",
               "dmc_humanoid": "Humanoid (pixels)", "kitchen": "Kitchen (pixels)"}
 plt.rcParams.update({
@@ -120,8 +121,9 @@ def metra_runs(exp_dir, env):
         rf = os.path.join(d, "resumed_from.txt")
         if os.path.exists(rf):
             parent = os.path.realpath(open(rf).read().split()[0])
+        # METRA logs policy steps, convert to environment steps
         info[d] = {"dir": d, "method": method_name(args), "seed": int(args["seed"]), "parent": parent,
-                   "steps": e["TotalEnvSteps"], "value": e[key], "traj": trajs}
+                   "steps": e["TotalEnvSteps"] * ACTION_REPEAT.get(env, 1), "value": e[key], "traj": trajs}
 
     def chain(d):
         r = info[d]
