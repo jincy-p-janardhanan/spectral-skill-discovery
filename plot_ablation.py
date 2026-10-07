@@ -1,9 +1,10 @@
-"""Coverage vs environment steps for SSD ablation groups, with METRA for reference.
+"""Coverage vs environment steps for groups of SSD runs, with METRA for reference, and a table of final values.
 
-    uv run plot_ablation.py --env ant --groups "SSD (Gaussian z)=exp/Paper/ant_K2_s*" \
-        "unit z=exp/Ablation/ant_unit_z/*" --out figures/ablation/ant.png
+    uv run plot_ablation.py --env ant --max_steps 8e6 --groups "defaults=exp/Benchmark/ant_K2_s[012]" \
+        --group_dirs "exp/Tune/ant_*" --legend_outside --out figures/sweep/ant.png
 
-Each group is LABEL=GLOB over run directories.
+Each --groups entry is LABEL=GLOB over run directories; each directory matched by --group_dirs is one group of
+runs, labelled by its name.
 """
 
 import argparse
@@ -32,7 +33,8 @@ def group_runs(pattern, env):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--env", default="ant")
-    p.add_argument("--groups", nargs="+", required=True, help="LABEL=GLOB")
+    p.add_argument("--groups", nargs="+", default=[], help="LABEL=GLOB")
+    p.add_argument("--group_dirs", default=None, help="GLOB over directories that each hold one group's runs")
     p.add_argument("--metra_dir", default=None, help="METRA's experiment group, drawn for reference")
     p.add_argument("--max_steps", type=float, default=None)
     p.add_argument("--title", default=None)
@@ -40,9 +42,11 @@ def main():
     p.add_argument("--out", required=True)
     args = p.parse_args()
 
+    specs = [spec.rsplit("=", 1) for spec in args.groups]  # labels may contain "=", globs do not
+    if args.group_dirs:
+        specs += [(os.path.basename(d), os.path.join(d, "*")) for d in sorted(glob.glob(args.group_dirs))]
     curves = []
-    for i, spec in enumerate(args.groups):
-        label, pattern = spec.rsplit("=", 1)  # labels may contain "=", globs do not
+    for i, (label, pattern) in enumerate(specs):
         runs = group_runs(pattern, args.env)
         if runs:
             curves.append((label, runs, PALETTE[i % len(PALETTE)], "-"))

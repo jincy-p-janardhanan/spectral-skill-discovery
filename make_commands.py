@@ -2,6 +2,7 @@
 
     uv run make_commands.py --out commands/commands.txt
     uv run make_commands.py --smoke --out commands/smoke.txt
+    uv run make_commands.py --sweep --out commands/sweep.txt
 """
 
 import argparse
@@ -42,6 +43,11 @@ for _env in ("dmc_quadruped", "dmc_humanoid", "kitchen"):
 N_ITERS = {"ant": 10001, "half_cheetah": 10001, "dmc_quadruped": 2001, "dmc_humanoid": 3201, "kitchen": 2501}
 N_EVAL = {"ant": 500, "half_cheetah": 500, "dmc_quadruped": 100, "dmc_humanoid": 160, "kitchen": 125}
 
+# hyperparameter sweep: one value changed at a time, 8M steps, 3 seeds
+SWEEP = {"eta_beta": ["0.001", "0.1"], "c0": ["0.1", "10"], "kappa": ["0", "0.0001"], "n_dual": ["1", "100"],
+         "nu0": ["3"]}
+SWEEP_ENVS, SWEEP_SEEDS, SWEEP_ITERS = ("ant", "half_cheetah"), (0, 1, 2), 5001
+
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -50,19 +56,28 @@ def main():
     p.add_argument("--seeds", type=int, nargs="+", default=list(range(8)))
     p.add_argument("--envs", nargs="+", default=list(ENVS))
     p.add_argument("--smoke", action="store_true", help="one short run per environment")
+    p.add_argument("--sweep", action="store_true", help="the hyperparameter sweep on Ant and HalfCheetah")
     args = p.parse_args()
 
-    seeds = [0] if args.smoke else args.seeds
-    group = "Smoke" if args.smoke else args.run_group
     cmds = []
-    for env in args.envs:
-        for seed in seeds:
-            cmd = f"python train.py --run_group {group} --seed {seed} {COMMON} {ENVS[env]}"  # env flags win
-            if args.smoke:
-                cmd += " --n_iters 30 --n_log 5 --n_eval 15 --min_buffer_size 3000 --n_readout_trajs 16"
-            else:
-                cmd += f" --n_iters {N_ITERS[env]} --n_eval {N_EVAL[env]}"
-            cmds.append(cmd)
+    if args.sweep:
+        for env in SWEEP_ENVS:
+            for seed in SWEEP_SEEDS:
+                for name, values in SWEEP.items():
+                    for value in values:
+                        cmds.append(f"python train.py --run_group Tune/{env}_{name}{value} --seed {seed} {COMMON} "
+                                    f"{ENVS[env]} --n_iters {SWEEP_ITERS} --n_eval {N_EVAL[env]} --{name} {value}")
+    else:
+        seeds = [0] if args.smoke else args.seeds
+        group = "Smoke" if args.smoke else args.run_group
+        for env in args.envs:
+            for seed in seeds:
+                cmd = f"python train.py --run_group {group} --seed {seed} {COMMON} {ENVS[env]}"  # env flags win
+                if args.smoke:
+                    cmd += " --n_iters 30 --n_log 5 --n_eval 15 --min_buffer_size 3000 --n_readout_trajs 16"
+                else:
+                    cmd += f" --n_iters {N_ITERS[env]} --n_eval {N_EVAL[env]}"
+                cmds.append(cmd)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text("\n".join(cmds) + "\n")
     print(f"Wrote {len(cmds)} commands to {args.out}")

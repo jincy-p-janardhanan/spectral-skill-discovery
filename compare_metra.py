@@ -4,7 +4,8 @@
     uv run compare_metra.py --metra_dir <metra_run_group> --envs ant half_cheetah --baselines METRA LSD DIAYN DADS \
         --out figures/all_baselines
 
-Writes <out>/coverage_vs_steps.png, <out>/trajectories.png and <out>/final_coverage.csv.
+Writes <out>/coverage_vs_steps.png, <out>/trajectories.png and <out>/final_coverage.csv, which includes each
+baseline's exact permutation-test p-value against SSD on the final values.
 """
 
 import argparse
@@ -12,6 +13,7 @@ import csv
 import glob
 import os
 import re
+from itertools import combinations
 from pathlib import Path
 
 import matplotlib
@@ -158,6 +160,13 @@ def mean_std(runs):
     return steps, vals.mean(0), vals.std(0), vals
 
 
+def permutation_p(a, b) -> float:
+    x = np.r_[a, b].astype(float)
+    sums = x[np.array(list(combinations(range(len(x)), len(a))))].sum(axis=1)
+    diffs = np.abs(sums / len(a) - (x.sum() - sums) / len(b))
+    return float(np.mean(diffs >= abs(np.mean(a) - np.mean(b)) - 1e-9))
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--envs", nargs="+", default=["ant", "half_cheetah"])
@@ -180,6 +189,7 @@ def main():
     fig, axes = plt.subplots(1, len(args.envs), figsize=(6.2 * len(args.envs), 4.3), squeeze=False)
     rows = []
     for ax, env in zip(axes[0], args.envs):
+        ssd_final = None
         for m, runs in data[env].items():
             steps, mu, sd, vals = mean_std(runs)
             x = steps / 1e6
@@ -187,9 +197,12 @@ def main():
             ax.plot(x, mu, color=COLORS[m], lw=2.2, label=f"{m} ({len(runs)} seeds)")
             ax.annotate(f"{mu[-1]:.0f}", (x[-1], mu[-1]), xytext=(5, 0), textcoords="offset points",
                         va="center", fontsize=8.5, color=INK2)
+            if m == "SSD":
+                ssd_final = vals[:, -1]
+            p_value = "" if m == "SSD" or ssd_final is None else round(permutation_p(ssd_final, vals[:, -1]), 3)
             rows.append({"env": env, "method": m, "seeds": len(runs), "final_env_steps": int(steps[-1]),
                          "final_mean": round(float(mu[-1]), 1), "final_std": round(float(sd[-1]), 1),
-                         "per_seed": " ".join(f"{v:.0f}" for v in vals[:, -1])})
+                         "p_vs_SSD": p_value, "per_seed": " ".join(f"{v:.0f}" for v in vals[:, -1])})
         ax.set_title(ENV_TITLES.get(env, env))
         ax.set_xlabel("environment steps (millions)")
         ax.set_ylabel(metric_keys(env)[2])
@@ -232,8 +245,9 @@ def main():
     plt.close(fig)
 
     for r in rows:
+        p_value = f"p = {r['p_vs_SSD']:.3f}" if r["p_vs_SSD"] != "" else ""
         print(f"{r['env']:13s} {r['method']:6s} {r['seeds']} seeds @ {r['final_env_steps']/1e6:.1f}M steps: "
-              f"{r['final_mean']:7.1f} +- {r['final_std']:6.1f}   per seed: {r['per_seed']}")
+              f"{r['final_mean']:7.1f} +- {r['final_std']:6.1f}  {p_value:9s}  per seed: {r['per_seed']}")
     print(f"Wrote {out}/coverage_vs_steps.png, trajectories.png, final_coverage.csv")
 
 
