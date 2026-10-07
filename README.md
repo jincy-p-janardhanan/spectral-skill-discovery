@@ -18,7 +18,7 @@ The code itself is new and self-contained: METRA's garage / gym / mujoco-py stac
 
 ```bash
 uv sync            # creates .venv with the pinned versions from uv.lock
-uv run pytest      # unit tests (no MuJoCo needed)
+uv run pytest      # unit tests (CPU only)
 ```
 
 ## Training
@@ -30,7 +30,8 @@ uv run pytest      # unit tests (no MuJoCo needed)
 Outputs go to `exp/<run_group>/<env>_K<K>_s<seed>/` (with `--resume 1`, as in the generated commands):
 - `progress.csv`: training scalars (J, h, mean |C|, ν, c, SAC stats).
 - `eval.csv`: K⋆, σ²ₖ, Rₖ and floorₖ for every k, plus coverage (Kitchen: tasks achieved).
-- `plots/`: spectrum and x-y trajectory figures at every evaluation, plus per-dimension sweeps for continuous skills.
+- `plots/`: spectrum and trajectory figures (x-y position; Kitchen: the first two arm joints) at every evaluation,
+  plus per-dimension sweeps for continuous skills.
 - `tb/`: TensorBoard logs.
 - `checkpoint.pt`, `checkpoints/`: latest and periodic checkpoints.
 - `resume.pt`: agent, optimisers, replay buffer and RNG states. Rerunning the same command continues from it.
@@ -39,9 +40,9 @@ Outputs go to `exp/<run_group>/<env>_K<K>_s<seed>/` (with `--resume 1`, as in th
 
 ### 1. SSD runs
 
-`make_commands.py` writes one `train.py` command per line: the 5 environments with 8 seeds each, using the
-per-environment settings of METRA's benchmark. One METRA epoch (8 trajectories, then
-`trans_optimization_epochs` updates) is one SSD iteration.
+`make_commands.py` writes one `train.py` command per line: the 5 environments with 8 seeds each. Each environment
+uses the settings of its command in METRA's README and is trained for as long as in METRA's paper (Fig. 5). One
+METRA epoch (8 trajectories, then `trans_optimization_epochs` updates) is one SSD iteration.
 
 | Env | Obs | Skills | T | Updates / iter | Buffer | Iterations | Eval every |
 |---|---|---|---|---|---|---|---|
@@ -69,9 +70,16 @@ bash commands/main.txt                  # everything, one run after another
 
 ### 2. Baselines
 
-METRA, LSD and DIAYN are run with the official METRA code, using the commands of its README with seeds 0-7.
+METRA, LSD and DIAYN are run with the official METRA code (`tests/main.py`) with seeds 0-7:
+- Each environment uses its METRA command from METRA's README. LSD adds `--dual_reg 0 --spectral_normalization 1`
+  and DIAYN `--inner 0 --unit_length 0 --dual_reg 0`, the flags METRA's README gives for Ant.
+- `--n_epochs` sets the training length of METRA's paper: 10001 for Ant and HalfCheetah, 2001 for Quadruped, 3201 for
+  Humanoid and 2501 for Kitchen. `--n_epochs_per_eval` is 500, 500, 100, 160 and 125, as for SSD.
+
 The scripts below read those runs from METRA's experiment directory (`--metra_dir`), identifying the method, seed
-and environment of each run from its `debug.log`.
+and environment of each run from its `debug.log`. A run that was interrupted and continued from a snapshot in a new
+directory (our copy of METRA's `tests/main.py` adds a `--resume_from` option for this, which writes
+`resumed_from.txt`) is joined to the run it continues.
 
 ### 3. Tables and figures
 
@@ -84,7 +92,8 @@ uv run compare_metra.py --ssd_dir exp/Benchmark --metra_dir <metra_run_group> --
 uv run compare_metra.py --ssd_dir exp/Benchmark --metra_dir <metra_run_group> --baselines METRA LSD DIAYN \
     --envs dmc_quadruped dmc_humanoid kitchen --out figures/pixels
 
-# Spectrum readout across seeds (final spread and return per dimension, spread over training) and K* per seed
+# Spectrum readout across seeds (final spread and return per dimension, spread over training); prints how many
+# seeds have each K*
 uv run plot_spectrum_summary.py --groups "ant=exp/Benchmark/ant_*" "half_cheetah=exp/Benchmark/half_cheetah_*" \
     --out figures/spectrum/state
 uv run plot_spectrum_summary.py --groups "dmc_quadruped=exp/Benchmark/dmc_quadruped_*" \
@@ -132,6 +141,8 @@ Where each part of the SSD algorithm is implemented:
 - **DMC** (`ssd/dmc.py`, `ssd/custom_dmc_tasks/`): METRA's coloured-floor tasks on current `dm_control`. The only
   change to METRA's task code is `np.in1d` → `np.isin` for NumPy 2.
 - **Kitchen** (`ssd/kitchen/`): the D4RL / RAPS end-effector kitchen and LEXA wrapper that METRA uses, vendored
-  with compatibility fixes for current MuJoCo, Gymnasium and NumPy.
+  with compatibility fixes for current MuJoCo, Gymnasium and NumPy. MuJoCo 3's weld constraint, which moves the arm,
+  corrects orientation much more weakly than MuJoCo 2.1's, so its torquescale is set to 24 (`WELD_TORQUESCALE`),
+  which reproduces the arm motion of METRA's environment.
 - `SSDConfig` has further options (e.g. a decorrelation warm-up, an EMA target encoder for the reward or the
   readout) that the benchmark leaves at their defaults.

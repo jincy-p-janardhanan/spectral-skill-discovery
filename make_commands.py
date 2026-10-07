@@ -39,7 +39,7 @@ PIXEL_DECOR = "--encoder_per_dim 1 --decor_scale 10"
 for _env in ("dmc_quadruped", "dmc_humanoid", "kitchen"):
     ENVS[_env] += " " + PIXEL_DECOR
 
-# training length and evaluation period of METRA's benchmark, in METRA epochs = SSD iterations
+# training length of METRA's paper (Fig. 5) and evaluation period, in METRA epochs = SSD iterations
 N_ITERS = {"ant": 10001, "half_cheetah": 10001, "dmc_quadruped": 2001, "dmc_humanoid": 3201, "kitchen": 2501}
 N_EVAL = {"ant": 500, "half_cheetah": 500, "dmc_quadruped": 100, "dmc_humanoid": 160, "kitchen": 125}
 
