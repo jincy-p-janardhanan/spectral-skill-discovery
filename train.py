@@ -156,7 +156,7 @@ def main():
     resume_path = log_dir / "resume.pt"
     state = None
     if args.resume and resume_path.exists():
-        state = torch.load(resume_path, map_location=device, weights_only=False)
+        state = torch.load(resume_path, map_location="cpu", weights_only=False)  # RNG states must stay on the CPU
     log_dir.mkdir(parents=True, exist_ok=bool(args.resume))
     if state is None:
         (log_dir / "config.json").write_text(json.dumps(vars(args), indent=2))
