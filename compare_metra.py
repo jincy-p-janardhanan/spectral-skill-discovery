@@ -11,6 +11,7 @@ baseline's exact permutation-test p-value against SSD on the final values.
 import argparse
 import csv
 import glob
+import math
 import os
 import re
 from itertools import combinations
@@ -160,9 +161,15 @@ def mean_std(runs):
     return steps, vals.mean(0), vals.std(0), vals
 
 
-def permutation_p(a, b) -> float:
+def permutation_p(a, b, max_exact=1_000_000, n_random=200_000) -> float:
+    """Two-sided permutation test of the difference in means: exact over all splits when there are at most
+    max_exact of them (8 + 8 seeds: 12870), otherwise over n_random random splits."""
     x = np.r_[a, b].astype(float)
-    sums = x[np.array(list(combinations(range(len(x)), len(a))))].sum(axis=1)
+    if math.comb(len(x), len(a)) <= max_exact:
+        idx = np.array(list(combinations(range(len(x)), len(a))))
+    else:
+        idx = np.argsort(np.random.default_rng(0).random((n_random, len(x))), axis=1)[:, :len(a)]
+    sums = x[idx].sum(axis=1)
     diffs = np.abs(sums / len(a) - (x.sum() - sums) / len(b))
     return float(np.mean(diffs >= abs(np.mean(a) - np.mean(b)) - 1e-9))
 
