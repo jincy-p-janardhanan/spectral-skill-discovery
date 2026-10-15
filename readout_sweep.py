@@ -17,6 +17,7 @@ import numpy as np
 import torch
 
 from ssd import spectral
+from ssd.envs import PIXEL_ENVS
 from ssd.networks import Encoder
 
 
@@ -24,13 +25,19 @@ def load_run(run_dir: str):
     """Encode a run's replay buffer: phi [n, T+1, K], skill weights [n, K] and the iteration."""
     cfg = json.load(open(os.path.join(run_dir, "config.json")))
     state = torch.load(os.path.join(run_dir, "resume.pt"), map_location="cpu", weights_only=False)
-    obs, z = state["buffer"]["obs"].float(), state["buffer"]["z"]
+    obs, z = state["buffer"]["obs"], state["buffer"]["z"]
     k = z.shape[1]
-    enc = Encoder(obs.shape[-1], k, cfg["hidden_dim"], cfg["n_layers"], per_dim=bool(cfg.get("encoder_per_dim", 0)))
+    pixel = cfg["env"] in PIXEL_ENVS
+    pixel_shape = (obs.shape[-1] // (64 * 64), 64, 64) if pixel else None  # stacked 64x64 RGB frames, kept uint8
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    enc = Encoder(obs.shape[-1], k, cfg["hidden_dim"], cfg["n_layers"], pixel_shape=pixel_shape,
+                  per_dim=bool(cfg.get("encoder_per_dim", 0))).to(device)
     enc.load_state_dict(state["agent"]["encoder"])
     with torch.no_grad():
         flat = obs.reshape(-1, obs.shape[-1])
-        phi = torch.cat([enc(chunk) for chunk in flat.split(65536)]).reshape(obs.shape[0], obs.shape[1], k)
+        chunks = flat.split(2048 if pixel else 65536)
+        phi = torch.cat([enc(c.to(device) if pixel else c.float().to(device)).cpu() for c in chunks])
+        phi = phi.reshape(obs.shape[0], obs.shape[1], k)
     if cfg.get("discrete") and not (cfg.get("cube_skills") or cfg.get("signed_skills")):
         z = (z - z.mean(dim=-1, keepdim=True)) * k / max(k - 1, 1)  # METRA's centred mask, as in training
     return phi, z, state["iter"]
