@@ -82,7 +82,7 @@ def plot_final(groups, out):
         else:
             ax1.set_ylim(0, 1.15 * sigma2.max())
             ax1.set_ylabel(r"spread $\sigma_k^2$")
-        ax1.set_title(f"{ENV_TITLES.get(env, env)}, {steps:.0f}M steps: spread", fontsize=10.5)
+        ax1.set_title(f"{ENV_TITLES.get(env, env)}, {steps:.3g}M steps: spread", fontsize=10.5)
         strip(ax2, ret, SSD_BLUE, rng)
         for j in range(ret.shape[1]):
             ax2.plot([j + 0.62, j + 1.38], [np.median(floor[:, j])] * 2, color=FLOOR, lw=1.6, ls=(0, (3, 2)), zorder=2)
@@ -133,7 +133,7 @@ def main():
     args = p.parse_args()
     groups = []
     for spec in args.groups:
-        env, pattern = spec.split("=", 1)
+        env, pattern = spec.rsplit("=", 1)  # labels may contain "=", globs do not
         runs = load(pattern, args.min_ratio)
         if runs:
             groups.append((env, runs))
